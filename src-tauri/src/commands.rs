@@ -1,7 +1,7 @@
 // Tauri Commands 模块
 // 提供前后端通信接口
 
-use crate::datasource::{ConnectionResult, DataSourceManager, IndexMatchResult};
+use crate::datasource::{BatchTestResult, ConnectionResult, DataSourceManager, IndexMatchResult};
 use crate::error_logger::{ErrorLog, ErrorLogger};
 use crate::progress::{ProgressMonitor, TaskProgress};
 use crate::storage::{DataSource, SyncTask};
@@ -19,6 +19,23 @@ pub struct AppState {
     pub progress_monitor: Arc<ProgressMonitor>,
     pub error_logger: Arc<ErrorLogger>,
     pub sync_engine: Arc<SyncEngine>,
+}
+
+// ============================================================================
+// 数据传输对象 (DTO)
+// ============================================================================
+
+/// 创建数据源的请求数据
+#[derive(Debug, serde::Deserialize)]
+pub struct CreateDataSourceRequest {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub database: Option<String>,
 }
 
 // ============================================================================
@@ -53,12 +70,32 @@ pub async fn get_data_source(
 /// 创建数据源
 #[tauri::command]
 pub async fn create_data_source(
-    data_source: DataSource,
+    data_source: CreateDataSourceRequest,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    use crate::storage::{DataSource, DataSourceType};
+    use chrono::Utc;
+    
+    // 将请求数据转换为 DataSource
+    let source_type = DataSourceType::from_str(&data_source.source_type)
+        .map_err(|e| e.to_string())?;
+    
+    let ds = DataSource {
+        id: String::new(), // 会被 create_data_source 方法重新生成
+        name: data_source.name,
+        source_type,
+        host: data_source.host,
+        port: data_source.port,
+        username: data_source.username,
+        password: data_source.password,
+        database: data_source.database,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    
     state
         .data_source_manager
-        .create_data_source(data_source)
+        .create_data_source(ds)
         .await
         .map_err(|e| e.to_string())
 }
@@ -94,11 +131,26 @@ pub async fn delete_data_source(
 #[tauri::command]
 pub async fn test_connection(
     id: String,
+    window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<ConnectionResult, String> {
     state
         .data_source_manager
-        .test_connection(&id)
+        .test_connection_with_events(&id, Some(window))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 批量测试所有数据源连接
+#[tauri::command]
+pub async fn batch_test_connections(
+    window: tauri::Window,
+    skip_failed_step1: bool,
+    state: State<'_, AppState>,
+) -> Result<BatchTestResult, String> {
+    state
+        .data_source_manager
+        .batch_test_connections(Some(window), skip_failed_step1)
         .await
         .map_err(|e| e.to_string())
 }

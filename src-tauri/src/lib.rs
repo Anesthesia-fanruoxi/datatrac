@@ -30,6 +30,40 @@ pub fn run() {
         )?;
       }
 
+      // 设置主窗口大小为屏幕的 80%
+      if let Some(window) = app.get_webview_window("main") {
+        if let Ok(monitor) = window.current_monitor() {
+          if let Some(monitor) = monitor {
+            let size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+            
+            // 计算物理像素
+            let physical_width = size.width;
+            let physical_height = size.height;
+            
+            // 转换为逻辑像素
+            let logical_width = (physical_width as f64 / scale_factor) as u32;
+            let logical_height = (physical_height as f64 / scale_factor) as u32;
+            
+            // 计算 80% 大小
+            let window_width = (logical_width as f64 * 0.8) as u32;
+            let window_height = (logical_height as f64 * 0.8) as u32;
+            
+            // 设置窗口大小
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+              width: window_width as f64,
+              height: window_height as f64,
+            }));
+            
+            // 居中显示
+            let _ = window.center();
+            
+            log::info!("窗口大小设置为: {}x{} (屏幕: {}x{})", 
+              window_width, window_height, logical_width, logical_height);
+          }
+        }
+      }
+
       // 初始化后端服务
       let app_handle = app.handle().clone();
       
@@ -120,6 +154,7 @@ pub fn run() {
       commands::update_data_source,
       commands::delete_data_source,
       commands::test_connection,
+      commands::batch_test_connections,
       // 元数据查询
       commands::get_databases,
       commands::get_tables,

@@ -21,8 +21,8 @@ export interface DataSource {
   username: string;
   password: string; // 加密存储
   database?: string; // MySQL 专用
-  createdAt: string;
-  updatedAt: string;
+  createdAt: number; // 毫秒时间戳
+  updatedAt: number; // 毫秒时间戳
 }
 
 /**
@@ -32,6 +32,38 @@ export interface ConnectionResult {
   success: boolean;
   message: string;
   details?: string;
+  steps?: ConnectionTestStep[]; // 测试步骤详情
+}
+
+/**
+ * 连接测试步骤
+ */
+export interface ConnectionTestStep {
+  step: number;
+  name: string;
+  success: boolean;
+  message: string;
+  duration?: number; // 耗时（毫秒）
+}
+
+/**
+ * 批量测试单个数据源的结果
+ */
+export interface BatchTestDataSourceResult {
+  dataSourceId: string;
+  dataSourceName: string;
+  steps: ConnectionTestStep[];
+  success: boolean;
+}
+
+/**
+ * 批量测试结果
+ */
+export interface BatchTestResult {
+  total: number;
+  success: number;
+  failed: number;
+  results: BatchTestDataSourceResult[];
 }
 
 // ==================== 同步任务相关类型 ====================
@@ -96,8 +128,8 @@ export interface SyncTask {
   syncConfig: SyncConfig;
   
   status: TaskStatus;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: number; // 毫秒时间戳
+  updatedAt: number; // 毫秒时间戳
 }
 
 /**

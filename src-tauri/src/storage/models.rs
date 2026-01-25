@@ -41,7 +41,9 @@ pub struct DataSource {
     pub username: String,
     pub password: String, // 加密存储
     pub database: Option<String>, // MySQL 专用
+    #[serde(rename = "createdAt", with = "chrono::serde::ts_milliseconds")]
     pub created_at: DateTime<Utc>,
+    #[serde(rename = "updatedAt", with = "chrono::serde::ts_milliseconds")]
     pub updated_at: DateTime<Utc>,
 }
 
@@ -84,12 +86,18 @@ impl TaskStatus {
 pub struct SyncTask {
     pub id: String,
     pub name: String,
+    #[serde(rename = "sourceId")]
     pub source_id: String,
+    #[serde(rename = "targetId")]
     pub target_id: String,
+    #[serde(rename = "sourceType")]
     pub source_type: DataSourceType,
+    #[serde(rename = "targetType")]
     pub target_type: DataSourceType,
     pub config: String, // JSON 格式的配置
     pub status: TaskStatus,
+    #[serde(rename = "createdAt", with = "chrono::serde::ts_milliseconds")]
     pub created_at: DateTime<Utc>,
+    #[serde(rename = "updatedAt", with = "chrono::serde::ts_milliseconds")]
     pub updated_at: DateTime<Utc>,
 }

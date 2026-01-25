@@ -12,7 +12,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import type { DataSource, ConnectionResult } from '../types';
+import type { DataSource, ConnectionResult, BatchTestResult } from '../types';
 
 export const useDataSourceStore = defineStore('dataSource', () => {
   // ==================== 状态 ====================
@@ -32,8 +32,7 @@ export const useDataSourceStore = defineStore('dataSource', () => {
     error.value = null;
     
     try {
-      const result = await invoke<DataSource[]>('list_data_sources');
-      dataSources.value = result;
+      dataSources.value = await invoke<DataSource[]>('list_data_sources');
     } catch (e) {
       error.value = `获取数据源列表失败: ${e}`;
       console.error('fetchDataSources error:', e);
@@ -48,8 +47,7 @@ export const useDataSourceStore = defineStore('dataSource', () => {
    */
   async function getDataSource(id: string): Promise<DataSource | null> {
     try {
-      const result = await invoke<DataSource>('get_data_source', { id });
-      return result;
+      return await invoke<DataSource>('get_data_source', { id });
     } catch (e) {
       error.value = `获取数据源失败: ${e}`;
       console.error('getDataSource error:', e);
@@ -127,11 +125,28 @@ export const useDataSourceStore = defineStore('dataSource', () => {
     error.value = null;
     
     try {
-      const result = await invoke<ConnectionResult>('test_connection', { id });
-      return result;
+      return await invoke<ConnectionResult>('test_connection', { id });
     } catch (e) {
       error.value = `测试连接失败: ${e}`;
       console.error('testConnection error:', e);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * 批量测试所有数据源连接
+   */
+  async function batchTestConnections(skipFailedStep1: boolean): Promise<BatchTestResult> {
+    loading.value = true;
+    error.value = null;
+    
+    try {
+      return await invoke<BatchTestResult>('batch_test_connections', { skipFailedStep1 });
+    } catch (e) {
+      error.value = `批量测试失败: ${e}`;
+      console.error('batchTestConnections error:', e);
       throw e;
     } finally {
       loading.value = false;
@@ -160,6 +175,7 @@ export const useDataSourceStore = defineStore('dataSource', () => {
     updateDataSource,
     deleteDataSource,
     testConnection,
+    batchTestConnections,
     clearError,
   };
 });

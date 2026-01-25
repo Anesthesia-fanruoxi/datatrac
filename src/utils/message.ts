@@ -111,11 +111,17 @@ export function handleApiError(error: any, defaultMessage = '操作失败') {
   
   let errorMessage = defaultMessage
   
+  // 尝试多种方式提取错误信息
   if (typeof error === 'string') {
-    errorMessage = error
+    errorMessage = `${defaultMessage}: ${error}`
   } else if (error?.message) {
-    errorMessage = error.message
+    errorMessage = `${defaultMessage}: ${error.message}`
+  } else if (error?.error) {
+    errorMessage = `${defaultMessage}: ${error.error}`
+  } else if (error?.toString && error.toString() !== '[object Object]') {
+    errorMessage = `${defaultMessage}: ${error.toString()}`
   }
   
-  showError(errorMessage)
+  // 使用通知而不是消息，显示更详细的错误
+  notifyError(defaultMessage, errorMessage)
 }
