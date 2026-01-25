@@ -214,7 +214,7 @@
 
 
 - [x] 9. 实现 Tauri Commands（前后端通信层）
-  - [ ] 9.1 实现数据源管理相关 Commands
+  - [x] 9.1 实现数据源管理相关 Commands
     - list_data_sources: 获取所有数据源
     - get_data_source: 获取单个数据源
     - create_data_source: 创建数据源
@@ -223,14 +223,14 @@
     - test_connection: 测试连接
     - _需求: 1.1, 1.4, 1.5, 1.6, 9.2_
   
-  - [ ] 9.2 实现元数据查询相关 Commands
+  - [x] 9.2 实现元数据查询相关 Commands
     - get_databases: 获取 MySQL 数据库列表
     - get_tables: 获取 MySQL 表列表
     - get_indices: 获取 ES 索引列表
     - match_indices: 通配符匹配 ES 索引
     - _需求: 3.2, 3.3, 3.4, 3.5, 3.6_
   
-  - [ ] 9.3 实现同步任务管理相关 Commands
+  - [x] 9.3 实现同步任务管理相关 Commands
     - list_tasks: 获取所有任务
     - get_task: 获取单个任务
     - create_task: 创建任务
@@ -238,7 +238,7 @@
     - delete_task: 删除任务
     - _需求: 3.9, 9.3_
   
-  - [ ] 9.4 实现任务执行控制相关 Commands
+  - [x] 9.4 实现任务执行控制相关 Commands
     - start_sync: 启动同步任务
     - pause_sync: 暂停同步任务
     - resume_sync: 恢复同步任务
@@ -246,7 +246,7 @@
     - get_errors: 获取错误日志
     - _需求: 4.1, 5.1, 5.2, 5.3, 5.4, 6.1, 7.3, 9.4_
   
-  - [ ] 9.5 配置 Tauri 应用
+  - [x] 9.5 配置 Tauri 应用
     - 在 main.rs 中注册所有 Commands
     - 配置应用窗口和权限
     - 初始化后端服务（Storage, CryptoService, DataSourceManager, SyncEngine）
@@ -309,8 +309,8 @@
     - 统一处理 API 调用的成功和失败提示
     - _需求: 9.5, 9.6_
 
-- [x] 12. 编写集成测试
-  - [ ] 12.1 搭建测试环境
+- [-] 12. 编写集成测试
+  - [x] 12.1 搭建测试环境
     - 使用 Docker Compose 启动 MySQL 和 ES 测试容器
     - 准备测试数据（创建测试数据库、表、索引）
     - 编写测试辅助函数

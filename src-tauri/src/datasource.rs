@@ -42,6 +42,11 @@ impl DataSourceManager {
         Self { storage, crypto }
     }
 
+    /// 获取 Storage 引用（用于任务管理）
+    pub fn storage(&self) -> &Arc<Storage> {
+        &self.storage
+    }
+
     /// 获取所有数据源列表
     /// 
     /// 返回的数据源中，密码字段已解密

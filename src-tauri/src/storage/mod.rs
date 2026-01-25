@@ -24,7 +24,7 @@ impl Storage {
         // 创建连接池
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&format!("sqlite:{}", db_path))
+            .connect(&format!("sqlite://{}", db_path))
             .await
             .context("连接 SQLite 数据库失败")?;
 
