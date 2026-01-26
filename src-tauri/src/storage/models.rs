@@ -31,6 +31,7 @@ impl DataSourceType {
 
 /// 数据源配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DataSource {
     pub id: String,
     pub name: String,
@@ -83,6 +84,7 @@ impl TaskStatus {
 
 /// 同步任务配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncTask {
     pub id: String,
     pub name: String,

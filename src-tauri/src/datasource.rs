@@ -11,6 +11,7 @@ use tauri::Emitter;
 
 /// 连接测试结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionResult {
     pub success: bool,
     pub message: String,
@@ -20,6 +21,7 @@ pub struct ConnectionResult {
 
 /// 连接测试步骤
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionTestStep {
     pub step: usize,
     pub name: String,
@@ -50,6 +52,7 @@ pub struct BatchTestResult {
 
 /// 索引匹配结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexMatchResult {
     pub pattern: String,
     pub count: usize,
@@ -350,7 +353,7 @@ impl DataSourceManager {
         ds: &DataSource,
         window: Option<tauri::Window>,
     ) -> Result<ConnectionResult> {
-        use elasticsearch::{Elasticsearch, http::transport::Transport};
+        use elasticsearch::{Elasticsearch};
         use std::time::Instant;
         use std::net::TcpStream;
         use std::time::Duration;
@@ -396,17 +399,31 @@ impl DataSourceManager {
         // 等待1秒
         tokio::time::sleep(Duration::from_secs(1)).await;
         
-        // 步骤 2: 验证 Elasticsearch 服务
+        // 步骤 2: 验证账号密码
         let step2_start = Instant::now();
-        let url = format!("http://{}:{}", ds.host, ds.port);
         
-        let transport = match Transport::single_node(&url) {
+        use elasticsearch::{
+            http::transport::{SingleNodeConnectionPool, TransportBuilder},
+            auth::Credentials,
+        };
+        use url::Url;
+        
+        let url_str = format!("http://{}:{}", ds.host, ds.port);
+        let url = Url::parse(&url_str)
+            .context("无效的 URL 格式")?;
+        let conn_pool = SingleNodeConnectionPool::new(url);
+        let credentials = Credentials::Basic(ds.username.clone(), ds.password.clone());
+        
+        let transport = match TransportBuilder::new(conn_pool)
+            .auth(credentials)
+            .build()
+        {
             Ok(t) => t,
             Err(e) => {
                 let step2_duration = step2_start.elapsed().as_millis() as u64;
                 let step2 = ConnectionTestStep {
                     step: 2,
-                    name: "验证 Elasticsearch 服务".to_string(),
+                    name: "验证账号密码".to_string(),
                     success: false,
                     message: format!("创建连接失败: {}", e),
                     duration: Some(step2_duration),
@@ -436,9 +453,9 @@ impl DataSourceManager {
                 if response.status_code().is_success() {
                     let step2 = ConnectionTestStep {
                         step: 2,
-                        name: "验证 Elasticsearch 服务".to_string(),
+                        name: "验证账号密码".to_string(),
                         success: true,
-                        message: "Elasticsearch 服务正常".to_string(),
+                        message: "账号密码验证成功".to_string(),
                         duration: Some(step2_duration),
                     };
                     
@@ -451,18 +468,25 @@ impl DataSourceManager {
                     
                     (step2, result)
                 } else {
+                    let status = response.status_code();
+                    let message = if status.as_u16() == 401 {
+                        "账号或密码错误".to_string()
+                    } else {
+                        format!("返回错误状态码: {}", status)
+                    };
+                    
                     let step2 = ConnectionTestStep {
                         step: 2,
-                        name: "验证 Elasticsearch 服务".to_string(),
+                        name: "验证账号密码".to_string(),
                         success: false,
-                        message: format!("返回错误状态码: {}", response.status_code()),
+                        message: message.clone(),
                         duration: Some(step2_duration),
                     };
                     
                     let result = ConnectionResult {
                         success: false,
-                        message: "连接失败".to_string(),
-                        details: Some(format!("Elasticsearch 返回错误状态码: {}", response.status_code())),
+                        message: "账号密码验证失败".to_string(),
+                        details: Some(message),
                         steps: Some(vec![steps[0].clone(), step2.clone()]),
                     };
                     
@@ -471,18 +495,25 @@ impl DataSourceManager {
             }
             Err(e) => {
                 let step2_duration = step2_start.elapsed().as_millis() as u64;
+                let error_msg = e.to_string();
+                let message = if error_msg.contains("401") || error_msg.contains("Unauthorized") {
+                    "账号或密码错误".to_string()
+                } else {
+                    format!("连接失败: {}", error_msg)
+                };
+                
                 let step2 = ConnectionTestStep {
                     step: 2,
-                    name: "验证 Elasticsearch 服务".to_string(),
+                    name: "验证账号密码".to_string(),
                     success: false,
-                    message: format!("连接失败: {}", e),
+                    message: message.clone(),
                     duration: Some(step2_duration),
                 };
                 
                 let result = ConnectionResult {
                     success: false,
-                    message: "连接失败".to_string(),
-                    details: Some(format!("无法连接到 Elasticsearch 服务器: {}", e)),
+                    message: "账号密码验证失败".to_string(),
+                    details: Some(message),
                     steps: Some(vec![steps[0].clone(), step2.clone()]),
                 };
                 
@@ -599,10 +630,23 @@ impl DataSourceManager {
             anyhow::bail!("只有 Elasticsearch 数据源支持获取索引列表");
         }
         
-        use elasticsearch::{Elasticsearch, http::transport::Transport, cat::CatIndicesParts};
+        use elasticsearch::{
+            Elasticsearch, 
+            http::transport::{SingleNodeConnectionPool, TransportBuilder},
+            auth::Credentials,
+            cat::CatIndicesParts,
+        };
+        use url::Url;
         
-        let url = format!("http://{}:{}", ds.host, ds.port);
-        let transport = Transport::single_node(&url)
+        let url_str = format!("http://{}:{}", ds.host, ds.port);
+        let url = Url::parse(&url_str)
+            .context("无效的 URL 格式")?;
+        let conn_pool = SingleNodeConnectionPool::new(url);
+        let credentials = Credentials::Basic(ds.username.clone(), ds.password.clone());
+        
+        let transport = TransportBuilder::new(conn_pool)
+            .auth(credentials)
+            .build()
             .context("创建 Elasticsearch 传输层失败")?;
         let client = Elasticsearch::new(transport);
         
@@ -914,10 +958,22 @@ impl DataSourceManager {
                 }
             }
             DataSourceType::Elasticsearch => {
-                use elasticsearch::{Elasticsearch, http::transport::Transport};
+                use elasticsearch::{
+                    Elasticsearch, 
+                    http::transport::{SingleNodeConnectionPool, TransportBuilder},
+                    auth::Credentials,
+                };
+                use url::Url;
                 
-                let url = format!("http://{}:{}", ds.host, ds.port);
-                match Transport::single_node(&url) {
+                let url_str = format!("http://{}:{}", ds.host, ds.port);
+                let url = Url::parse(&url_str).unwrap();
+                let conn_pool = SingleNodeConnectionPool::new(url);
+                let credentials = Credentials::Basic(ds.username.clone(), ds.password.clone());
+                
+                match TransportBuilder::new(conn_pool)
+                    .auth(credentials)
+                    .build()
+                {
                     Ok(transport) => {
                         let client = Elasticsearch::new(transport);
                         match client.ping().send().await {
@@ -925,7 +981,12 @@ impl DataSourceManager {
                                 if response.status_code().is_success() {
                                     (true, "Elasticsearch 服务正常".to_string())
                                 } else {
-                                    (false, format!("返回错误状态码: {}", response.status_code()))
+                                    let status = response.status_code();
+                                    if status.as_u16() == 401 {
+                                        (false, "返回错误状态码: 401 Unauthorized".to_string())
+                                    } else {
+                                        (false, format!("返回错误状态码: {}", status))
+                                    }
                                 }
                             }
                             Err(e) => (false, format!("连接失败: {}", e)),

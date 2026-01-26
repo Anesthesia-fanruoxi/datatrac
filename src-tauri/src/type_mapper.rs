@@ -46,14 +46,19 @@ impl TypeMapper {
                 }
             },
             
+            // BIT 类型
+            "BIT" => "long".to_string(),
+            
             // 字符串类型
             "VARCHAR" | "CHAR" => "keyword".to_string(),
             "TEXT" | "MEDIUMTEXT" | "LONGTEXT" | "TINYTEXT" => "text".to_string(),
+            "ENUM" | "SET" => "keyword".to_string(),
             
             // 日期时间类型
             "DATETIME" | "TIMESTAMP" => "date".to_string(),
             "DATE" => "date".to_string(),
             "TIME" => "keyword".to_string(),
+            "YEAR" => "keyword".to_string(),
             
             // 布尔类型
             "BOOLEAN" | "BOOL" => "boolean".to_string(),
@@ -67,6 +72,12 @@ impl TypeMapper {
             // 二进制类型
             "BLOB" | "MEDIUMBLOB" | "LONGBLOB" | "TINYBLOB" | "BINARY" | "VARBINARY" => {
                 "binary".to_string()
+            },
+            
+            // 空间类型
+            "GEOMETRY" | "POINT" | "LINESTRING" | "POLYGON" 
+            | "MULTIPOINT" | "MULTILINESTRING" | "MULTIPOLYGON" | "GEOMETRYCOLLECTION" => {
+                "geo_shape".to_string()
             },
             
             // 默认类型

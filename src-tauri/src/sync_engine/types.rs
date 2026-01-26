@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// 同步任务配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncTaskConfig {
     /// 任务 ID
     pub task_id: String,
@@ -35,6 +36,7 @@ pub enum SyncDirection {
 
 /// 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncConfig {
     /// 线程数（1-32）
     pub thread_count: usize,
@@ -42,6 +44,46 @@ pub struct SyncConfig {
     pub batch_size: usize,
     /// 错误处理策略
     pub error_strategy: ErrorStrategy,
+    /// 数据库名称转换配置（可选）
+    pub db_name_transform: Option<DbNameTransform>,
+    /// 目标表存在时的处理策略
+    pub table_exists_strategy: TableExistsStrategy,
+}
+
+/// 目标表存在时的处理策略
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TableExistsStrategy {
+    /// 删除并重建（默认）
+    Drop,
+    /// 清空数据但保留表结构
+    Truncate,
+    /// 备份原表后重建
+    Backup,
+}
+
+/// 数据库名称转换配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbNameTransform {
+    /// 是否启用
+    pub enabled: bool,
+    /// 转换模式
+    pub mode: TransformMode,
+    /// 源模式（前缀或后缀）
+    pub source_pattern: String,
+    /// 目标模式（前缀或后缀）
+    pub target_pattern: String,
+}
+
+/// 转换模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TransformMode {
+    /// 前缀替换
+    Prefix,
+    /// 后缀替换
+    Suffix,
 }
 
 /// 错误处理策略
@@ -56,6 +98,7 @@ pub enum ErrorStrategy {
 
 /// MySQL 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MysqlSyncConfig {
     /// 数据库和表的选择
     pub databases: Vec<DatabaseSelection>,
@@ -63,6 +106,7 @@ pub struct MysqlSyncConfig {
 
 /// 数据库选择
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DatabaseSelection {
     /// 数据库名称
     pub database: String,
@@ -72,6 +116,7 @@ pub struct DatabaseSelection {
 
 /// ES 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EsSyncConfig {
     /// 索引选择
     pub indices: Vec<IndexSelection>,
@@ -79,6 +124,7 @@ pub struct EsSyncConfig {
 
 /// 索引选择
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexSelection {
     /// 索引模式（可以是具体索引名或通配符）
     pub pattern: String,

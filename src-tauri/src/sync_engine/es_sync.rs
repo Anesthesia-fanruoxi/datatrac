@@ -65,6 +65,83 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// 根据策略处理 ES 索引（支持 drop/truncate/backup）
+    pub(super) async fn handle_es_index_with_strategy(
+        &self,
+        client: &Elasticsearch,
+        index: &str,
+        schema: &TableSchema,
+        strategy: &TableExistsStrategy,
+    ) -> Result<()> {
+        use chrono::Utc;
+        use elasticsearch::DeleteByQueryParts;
+        
+        // 检查索引是否存在
+        let exists_response = client
+            .indices()
+            .exists(IndicesExistsParts::Index(&[index]))
+            .send()
+            .await
+            .context("检查索引是否存在失败")?;
+        
+        let index_exists = exists_response.status_code().is_success();
+
+        match strategy {
+            TableExistsStrategy::Drop => {
+                // 删除并重建（默认行为）
+                self.drop_and_create_es_index(client, index, schema).await?;
+            }
+            TableExistsStrategy::Truncate => {
+                if index_exists {
+                    // 清空索引数据（删除所有文档）
+                    client
+                        .delete_by_query(DeleteByQueryParts::Index(&[index]))
+                        .body(json!({
+                            "query": {
+                                "match_all": {}
+                            }
+                        }))
+                        .send()
+                        .await
+                        .context("清空索引失败")?;
+                } else {
+                    // 索引不存在，创建新索引
+                    self.drop_and_create_es_index(client, index, schema).await?;
+                }
+            }
+            TableExistsStrategy::Backup => {
+                if index_exists {
+                    // 备份原索引（使用 reindex API）
+                    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+                    let backup_index = format!("{}_backup_{}", index, timestamp);
+                    
+                    // 创建备份索引
+                    client
+                        .reindex()
+                        .body(json!({
+                            "source": { "index": index },
+                            "dest": { "index": backup_index }
+                        }))
+                        .send()
+                        .await
+                        .context("备份索引失败")?;
+                    
+                    // 删除原索引
+                    client
+                        .indices()
+                        .delete(IndicesDeleteParts::Index(&[index]))
+                        .send()
+                        .await
+                        .context("删除原索引失败")?;
+                }
+                // 创建新索引
+                self.drop_and_create_es_index(client, index, schema).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// 批量插入数据到 ES
     pub(super) async fn batch_insert_es(
         &self,

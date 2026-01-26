@@ -95,12 +95,29 @@ export interface IndexSelection {
 }
 
 /**
+ * 数据库名称转换配置
+ */
+export interface DbNameTransform {
+  enabled: boolean;
+  mode: 'prefix' | 'suffix';
+  sourcePattern: string;
+  targetPattern: string;
+}
+
+/**
+ * 目标表存在时的处理策略（与后端保持一致）
+ */
+export type TableExistsStrategy = 'drop' | 'truncate' | 'backup';
+
+/**
  * 同步配置
  */
 export interface SyncConfig {
   threadCount: number; // 1-32
   batchSize: number;
   errorStrategy: ErrorStrategy;
+  tableExistsStrategy: TableExistsStrategy;
+  dbNameTransform?: DbNameTransform;
 }
 
 /**
@@ -144,6 +161,36 @@ export interface IndexMatchResult {
 // ==================== 任务监控相关类型 ====================
 
 /**
+ * 表同步状态
+ */
+export type TableStatus = 'waiting' | 'running' | 'completed' | 'failed';
+
+/**
+ * 表进度
+ */
+export interface TableProgress {
+  tableName: string;
+  status: TableStatus;
+  totalRecords: number;
+  processedRecords: number;
+  percentage: number;
+}
+
+/**
+ * 日志级别
+ */
+export type LogLevel = 'info' | 'warn' | 'error';
+
+/**
+ * 日志条目
+ */
+export interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+}
+
+/**
  * 任务进度
  */
 export interface TaskProgress {
@@ -156,6 +203,7 @@ export interface TaskProgress {
   estimatedTime: number; // 秒
   startTime: string;
   currentTable?: string; // 当前处理的表/索引
+  tableProgress?: TableProgress[]; // 表进度列表
 }
 
 /**

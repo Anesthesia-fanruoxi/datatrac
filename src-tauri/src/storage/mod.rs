@@ -22,9 +22,19 @@ impl Storage {
     /// * `db_path` - SQLite 数据库文件路径
     pub async fn new(db_path: &str) -> Result<Self> {
         // 创建连接池
+        // 使用 mode=rwc 参数确保文件可以被创建
+        let connection_string = if db_path.contains(':') {
+            // Windows 绝对路径
+            format!("sqlite:///{}?mode=rwc", db_path)
+        } else {
+            format!("sqlite://{}?mode=rwc", db_path)
+        };
+        
+        log::info!("SQLite 连接字符串: {}", connection_string);
+        
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&format!("sqlite://{}", db_path))
+            .connect(&connection_string)
             .await
             .context("连接 SQLite 数据库失败")?;
 

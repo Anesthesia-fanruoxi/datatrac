@@ -5,6 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+// 导入日志模块
+use crate::progress_logger::TaskLogger;
+
+// 重新导出日志类型，保持向后兼容
+pub use crate::progress_logger::{LogEntry, LogLevel};
+
 /// 任务进度信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +33,34 @@ pub struct TaskProgress {
     pub start_time: String,
     /// 当前处理的表/索引
     pub current_table: Option<String>,
+    /// 表级别进度列表
+    pub table_progress: Vec<TableProgress>,
+}
+
+/// 表级别进度信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableProgress {
+    /// 表名
+    pub table_name: String,
+    /// 表状态
+    pub status: TableStatus,
+    /// 总记录数
+    pub total_records: u64,
+    /// 已处理记录数
+    pub processed_records: u64,
+    /// 进度百分比 (0-100)
+    pub percentage: f64,
+}
+
+/// 表状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TableStatus {
+    Waiting,
+    Running,
+    Completed,
+    Failed,
 }
 
 /// 任务状态
@@ -43,6 +77,8 @@ pub enum TaskStatus {
 pub struct ProgressMonitor {
     /// 当前进度映射 (task_id -> TaskProgress)
     current_progress: Arc<RwLock<HashMap<String, TaskProgress>>>,
+    /// 任务日志管理器
+    logger: Arc<TaskLogger>,
     /// Tauri 应用句柄，用于发送事件
     app_handle: Option<AppHandle>,
 }
@@ -52,13 +88,15 @@ impl ProgressMonitor {
     pub fn new() -> Self {
         Self {
             current_progress: Arc::new(RwLock::new(HashMap::new())),
+            logger: Arc::new(TaskLogger::new()),
             app_handle: None,
         }
     }
 
     /// 设置应用句柄（用于发送事件）
     pub fn set_app_handle(&mut self, handle: AppHandle) {
-        self.app_handle = Some(handle);
+        self.app_handle = Some(handle.clone());
+        self.logger.set_app_handle(handle);
     }
 
     /// 启动任务跟踪
@@ -86,12 +124,16 @@ impl ProgressMonitor {
             estimated_time: 0,
             start_time,
             current_table: None,
+            table_progress: Vec::new(),
         };
 
         {
             let mut map = self.current_progress.write().unwrap();
             map.insert(task_id.to_string(), progress.clone());
         }
+
+        // 清除旧日志
+        self.logger.clear_logs(task_id);
 
         // 发送初始进度事件
         self.emit_progress_sync(&progress);
@@ -270,6 +312,129 @@ impl ProgressMonitor {
                 log::error!("Failed to emit progress event: {}", e);
             }
         }
+    }
+
+    /// 初始化表进度列表
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `table_names`: 表名列表
+    /// - `table_counts`: 每个表的记录数
+    pub fn init_table_progress(&self, task_id: &str, table_names: Vec<String>, table_counts: Vec<u64>) {
+        let mut map = self.current_progress.write().unwrap();
+        
+        if let Some(progress) = map.get_mut(task_id) {
+            progress.table_progress = table_names
+                .into_iter()
+                .zip(table_counts.into_iter())
+                .map(|(name, count)| TableProgress {
+                    table_name: name,
+                    status: TableStatus::Waiting,
+                    total_records: count,
+                    processed_records: 0,
+                    percentage: 0.0,
+                })
+                .collect();
+            
+            let progress_clone = progress.clone();
+            drop(map);
+            self.emit_progress_sync(&progress_clone);
+        }
+    }
+
+    /// 更新表进度
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `table_name`: 表名
+    /// - `processed`: 已处理记录数
+    pub fn update_table_progress(&self, task_id: &str, table_name: &str, processed: u64) {
+        let mut map = self.current_progress.write().unwrap();
+        
+        if let Some(progress) = map.get_mut(task_id) {
+            if let Some(table) = progress.table_progress.iter_mut().find(|t| t.table_name == table_name) {
+                table.processed_records = processed;
+                if table.total_records > 0 {
+                    table.percentage = (processed as f64 / table.total_records as f64) * 100.0;
+                }
+                if table.status == TableStatus::Waiting {
+                    table.status = TableStatus::Running;
+                }
+            }
+            
+            let progress_clone = progress.clone();
+            drop(map);
+            self.emit_progress_sync(&progress_clone);
+        }
+    }
+
+    /// 完成表同步
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `table_name`: 表名
+    pub fn complete_table(&self, task_id: &str, table_name: &str) {
+        let mut map = self.current_progress.write().unwrap();
+        
+        if let Some(progress) = map.get_mut(task_id) {
+            if let Some(table) = progress.table_progress.iter_mut().find(|t| t.table_name == table_name) {
+                table.status = TableStatus::Completed;
+                table.percentage = 100.0;
+                table.processed_records = table.total_records;
+            }
+            
+            let progress_clone = progress.clone();
+            drop(map);
+            self.emit_progress_sync(&progress_clone);
+        }
+    }
+
+    /// 表同步失败
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `table_name`: 表名
+    pub fn fail_table(&self, task_id: &str, table_name: &str) {
+        let mut map = self.current_progress.write().unwrap();
+        
+        if let Some(progress) = map.get_mut(task_id) {
+            if let Some(table) = progress.table_progress.iter_mut().find(|t| t.table_name == table_name) {
+                table.status = TableStatus::Failed;
+            }
+            
+            let progress_clone = progress.clone();
+            drop(map);
+            self.emit_progress_sync(&progress_clone);
+        }
+    }
+
+    /// 添加日志
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `level`: 日志级别
+    /// - `message`: 日志消息
+    pub fn add_log(&self, task_id: &str, level: LogLevel, message: String) {
+        self.logger.add_log(task_id, level, message);
+    }
+
+    /// 获取任务日志
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// 
+    /// # 返回
+    /// 日志列表
+    pub fn get_logs(&self, task_id: &str) -> Vec<LogEntry> {
+        self.logger.get_logs(task_id)
+    }
+
+    /// 清除任务日志
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    pub fn clear_logs(&self, task_id: &str) {
+        self.logger.clear_logs(task_id);
     }
 }
 

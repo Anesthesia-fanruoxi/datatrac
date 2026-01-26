@@ -7,10 +7,12 @@ use tauri::{AppHandle, Emitter};
 
 /// 错误日志条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorLog {
     /// 时间戳
     pub timestamp: DateTime<Utc>,
     /// 错误类型
+    #[serde(rename = "errorType")]
     pub error_type: String,
     /// 错误消息
     pub message: String,
@@ -121,19 +123,9 @@ impl ErrorLogger {
     /// * `app_handle` - Tauri 应用句柄
     /// * `task_id` - 任务 ID
     /// * `error` - 错误日志
-    fn emit_error(&self, app_handle: &AppHandle, task_id: &str, error: &ErrorLog) -> Result<(), tauri::Error> {
-        #[derive(Serialize, Clone)]
-        struct ErrorEvent {
-            task_id: String,
-            error: ErrorLog,
-        }
-
-        let event = ErrorEvent {
-            task_id: task_id.to_string(),
-            error: error.clone(),
-        };
-
-        app_handle.emit("sync-error", event)
+    fn emit_error(&self, app_handle: &AppHandle, _task_id: &str, error: &ErrorLog) -> Result<(), tauri::Error> {
+        // 直接发送错误日志，前端通过 task-error 事件接收
+        app_handle.emit("task-error", error)
     }
 }
 

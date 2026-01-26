@@ -74,11 +74,18 @@ impl SyncEngine {
                 &DataSourceType::Mysql,
             );
 
-            self.drop_and_create_mysql_table(
-                &mysql_pool,
+            // 应用数据库名称转换（ES索引名作为数据库名）
+            let transformed_db_name = self.transform_database_name(
                 target_database,
+                &config.sync_config.db_name_transform
+            );
+
+            self.handle_mysql_table_with_strategy(
+                &mysql_pool,
+                &transformed_db_name,
                 index,
-                &target_schema
+                &target_schema,
+                &config.sync_config.table_exists_strategy
             ).await?;
 
             let mut scroll_id: Option<String> = None;
@@ -107,7 +114,7 @@ impl SyncEngine {
 
                         let insert_result = self.batch_insert_mysql(
                             &mysql_pool,
-                            target_database,
+                            &transformed_db_name,
                             index,
                             &batch
                         ).await;
@@ -254,6 +261,29 @@ impl SyncEngine {
         let mysql_config = config.mysql_config
             .ok_or_else(|| anyhow::anyhow!("缺少 MySQL 配置"))?;
 
+        // 收集所有表名和记录数，用于初始化表进度
+        let mut all_tables = Vec::new();
+        let mut all_counts = Vec::new();
+        
+        for db_sel in &mysql_config.databases {
+            for table in &db_sel.tables {
+                all_tables.push(format!("{}.{}", db_sel.database, table));
+                let count = self.get_mysql_table_count(&source_pool, &db_sel.database, table).await?;
+                all_counts.push(count);
+            }
+        }
+        
+        // 初始化表进度列表
+        self.progress_monitor.init_table_progress(&task_id, all_tables.clone(), all_counts.clone());
+        
+        // 添加开始日志
+        self.progress_monitor.add_log(
+            &task_id,
+            crate::progress::LogLevel::Info,
+            format!("开始同步任务，共 {} 个表", all_tables.len())
+        );
+
+        // 计算总记录数
         let mut total_records = 0u64;
         for db_sel in &mysql_config.databases {
             for table in &db_sel.tables {
@@ -263,69 +293,143 @@ impl SyncEngine {
         }
 
         self.progress_monitor.start_task(&task_id, total_records);
-
         let mut processed_records = 0u64;
-        let target_database = target.database.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("目标 MySQL 数据源缺少数据库名"))?;
 
+        // 遍历每个数据库
         for db_sel in &mysql_config.databases {
+            let source_db = &db_sel.database;
+            let table_count = db_sel.tables.len();
+            
+            // 应用数据库名称转换
+            let target_db = self.transform_database_name(
+                source_db,
+                &config.sync_config.db_name_transform
+            );
+            
+            // 遍历每个表
             for table in &db_sel.tables {
+                let full_table_name = format!("{}.{}", source_db, table);
+                
                 self.progress_monitor.update_current_table(
                     &task_id,
-                    Some(format!("{}.{}", db_sel.database, table))
+                    Some(full_table_name.clone())
+                );
+                
+                // 添加日志：开始同步表
+                self.progress_monitor.add_log(
+                    &task_id,
+                    crate::progress::LogLevel::Info,
+                    format!("开始同步表: {}", full_table_name)
                 );
 
+                // 获取表结构
                 let source_schema = self.get_mysql_table_schema(
                     &source_pool,
-                    &db_sel.database,
+                    source_db,
                     table
                 ).await?;
 
-                self.drop_and_create_mysql_table(
+                // 创建目标表
+                self.handle_mysql_table_with_strategy(
                     &target_pool,
-                    target_database,
+                    &target_db,
                     table,
-                    &source_schema
+                    &source_schema,
+                    &config.sync_config.table_exists_strategy
                 ).await?;
 
-                let table_count = self.get_mysql_table_count(&source_pool, &db_sel.database, table).await?;
+                // 获取表记录数
+                let table_count = self.get_mysql_table_count(&source_pool, source_db, table).await?;
+                
+                if table_count == 0 {
+                    self.progress_monitor.add_log(
+                        &task_id,
+                        crate::progress::LogLevel::Info,
+                        format!("表 {} 无数据，跳过", full_table_name)
+                    );
+                    self.progress_monitor.complete_table(&task_id, &full_table_name);
+                    continue;
+                }
+                
+                // 计算批次信息
+                let total_batches = ((table_count as f64) / (batch_size as f64)).ceil() as u64;
+                
+                self.progress_monitor.add_log(
+                    &task_id,
+                    crate::progress::LogLevel::Info,
+                    format!("表 {} 总计: {} 条，分 {} 批次同步", full_table_name, table_count, total_batches)
+                );
+                
                 let mut offset = 0u64;
+                let mut current_batch = 1u64;
+                let mut table_synced_count = 0u64;
 
+                // 批量同步数据（使用原始行数据，避免类型转换）
                 while offset < table_count {
+                    // 检查暂停标志
                     if let Some(state) = self.get_task_state(&task_id) {
                         while state.pause_flag.load(std::sync::atomic::Ordering::SeqCst) {
                             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                         }
                     }
 
-                    let batch = self.read_mysql_batch(
+                    // 读取批量数据（原始行数据）
+                    let batch_result = self.read_mysql_batch_raw(
                         &source_pool,
-                        &db_sel.database,
+                        source_db,
                         table,
+                        &source_schema,
                         offset,
                         batch_size
                     ).await;
 
-                    match batch {
-                        Ok(batch) => {
-                            if batch.is_empty() {
+                    match batch_result {
+                        Ok(rows) => {
+                            if rows.is_empty() {
                                 break;
                             }
 
-                            let insert_result = self.batch_insert_mysql(
+                            let batch_len = rows.len() as u64;
+
+                            // 插入数据（使用原始行数据，传入表结构）
+                            let insert_result = self.batch_insert_mysql_raw(
                                 &target_pool,
-                                target_database,
+                                &target_db,
                                 table,
-                                &batch
+                                &rows,
+                                &source_schema
                             ).await;
 
                             match insert_result {
                                 Ok(_) => {
-                                    processed_records += batch.len() as u64;
-                                    offset += batch.len() as u64;
+                                    processed_records += batch_len;
+                                    table_synced_count += batch_len;
+                                    offset += batch_len;
+                                    
+                                    // 更新表进度
+                                    self.progress_monitor.update_table_progress(&task_id, &full_table_name, table_synced_count);
+                                    
+                                    let remaining_batches = total_batches - current_batch;
+                                    let batch_log = format!("  批次 {}/{} 完成，已同步: {} 条，剩余: {} 批次", 
+                                        current_batch, total_batches, table_synced_count, remaining_batches);
+                                    
+                                    // 推送批次进度日志到前端
+                                    self.progress_monitor.add_log(
+                                        &task_id,
+                                        crate::progress::LogLevel::Info,
+                                        batch_log
+                                    );
+                                    
+                                    current_batch += 1;
                                     self.progress_monitor.update_progress(&task_id, processed_records);
                                 }
                                 Err(e) => {
+                                    self.progress_monitor.add_log(
+                                        &task_id,
+                                        crate::progress::LogLevel::Error,
+                                        format!("表 {} 批次 {}/{} 插入失败: {}", full_table_name, current_batch, total_batches, e)
+                                    );
+                                    
                                     self.error_logger.log_error(
                                         &task_id,
                                         ErrorLog::new(
@@ -333,17 +437,20 @@ impl SyncEngine {
                                             format!("插入数据到目标 MySQL 失败: {}", e),
                                             Some(json!({
                                                 "table": table,
-                                                "offset": offset
+                                                "offset": offset,
+                                                "batch": current_batch
                                             }))
                                         )
                                     );
 
                                     match error_strategy {
                                         ErrorStrategy::Skip => {
-                                            offset += batch.len() as u64;
+                                            offset += batch_len;
+                                            current_batch += 1;
                                             continue;
                                         }
                                         ErrorStrategy::Pause => {
+                                            self.progress_monitor.fail_table(&task_id, &full_table_name);
                                             return Err(e);
                                         }
                                     }
@@ -358,7 +465,8 @@ impl SyncEngine {
                                     format!("读取源 MySQL 数据失败: {}", e),
                                     Some(json!({
                                         "table": table,
-                                        "offset": offset
+                                        "offset": offset,
+                                        "batch": current_batch
                                     }))
                                 )
                             );
@@ -366,6 +474,7 @@ impl SyncEngine {
                             match error_strategy {
                                 ErrorStrategy::Skip => {
                                     offset += batch_size as u64;
+                                    current_batch += 1;
                                     continue;
                                 }
                                 ErrorStrategy::Pause => {
@@ -374,6 +483,44 @@ impl SyncEngine {
                             }
                         }
                     }
+                }
+                
+                self.progress_monitor.add_log(
+                    &task_id,
+                    crate::progress::LogLevel::Info,
+                    format!("表 {} 同步完成，共同步: {} 条", full_table_name, table_synced_count)
+                );
+                
+                // 数据校验：对比源表和目标表的记录数
+                let source_count = self.get_mysql_table_count(&source_pool, source_db, table).await?;
+                let target_count = self.get_mysql_table_count(&target_pool, &target_db, table).await?;
+                
+                if source_count == target_count {
+                    self.progress_monitor.add_log(
+                        &task_id,
+                        crate::progress::LogLevel::Info,
+                        format!("✓ 表 {} 数据校验通过: {} 条", full_table_name, source_count)
+                    );
+                    self.progress_monitor.complete_table(&task_id, &full_table_name);
+                } else {
+                    let diff = if source_count > target_count {
+                        source_count - target_count
+                    } else {
+                        target_count - source_count
+                    };
+                    let success_rate = if source_count > 0 {
+                        target_count as f64 / source_count as f64 * 100.0
+                    } else {
+                        100.0
+                    };
+                    
+                    self.progress_monitor.add_log(
+                        &task_id,
+                        crate::progress::LogLevel::Warn,
+                        format!("✗ 表 {} 数据校验失败: 源 {} 条，目标 {} 条，差异 {} 条，成功率 {:.2}%", 
+                            full_table_name, source_count, target_count, diff, success_rate)
+                    );
+                    self.progress_monitor.fail_table(&task_id, &full_table_name);
                 }
             }
         }
@@ -437,7 +584,12 @@ impl SyncEngine {
             let mapping_body = mapping_response.json::<serde_json::Value>().await?;
             let source_schema = self.infer_schema_from_es_mapping(&mapping_body, index)?;
 
-            self.drop_and_create_es_index(&target_client, index, &source_schema).await?;
+            self.handle_es_index_with_strategy(
+                &target_client, 
+                index, 
+                &source_schema,
+                &config.sync_config.table_exists_strategy
+            ).await?;
 
             let mut scroll_id: Option<String> = None;
 

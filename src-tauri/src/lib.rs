@@ -4,6 +4,7 @@ mod storage;
 mod datasource;
 mod type_mapper;
 mod progress;
+mod progress_logger;
 pub mod error_logger;
 pub mod sync_engine;
 mod commands;
@@ -26,6 +27,7 @@ pub fn run() {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
             .build(),
         )?;
       }
@@ -172,6 +174,7 @@ pub fn run() {
       commands::resume_sync,
       commands::get_progress,
       commands::get_errors,
+      commands::get_task_logs,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

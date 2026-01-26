@@ -33,8 +33,40 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
     error.value = null;
     
     try {
-      const result = await invoke<SyncTask[]>('list_tasks');
-      tasks.value = result;
+      const result = await invoke<any[]>('list_tasks');
+      
+      // 转换后端数据格式为前端格式
+      tasks.value = result.map(task => {
+        let config = { mysqlConfig: undefined, esConfig: undefined, syncConfig: {} };
+        
+        try {
+          if (task.config) {
+            config = JSON.parse(task.config);
+          }
+        } catch (e) {
+          console.error('解析任务配置失败:', e);
+        }
+        
+        return {
+          id: task.id,
+          name: task.name,
+          sourceId: task.sourceId,
+          targetId: task.targetId,
+          sourceType: task.sourceType,
+          targetType: task.targetType,
+          mysqlConfig: config.mysqlConfig,
+          esConfig: config.esConfig,
+          syncConfig: config.syncConfig || {
+            threadCount: 4,
+            batchSize: 1000,
+            errorStrategy: 'skip',
+            tableExistsStrategy: 'drop'
+          },
+          status: task.status,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt
+        } as SyncTask;
+      });
     } catch (e) {
       error.value = `获取任务列表失败: ${e}`;
       console.error('fetchTasks error:', e);
@@ -49,9 +81,44 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
    */
   async function getTask(id: string): Promise<SyncTask | null> {
     try {
-      const result = await invoke<SyncTask>('get_task', { id });
-      currentTask.value = result;
-      return result;
+      const result = await invoke<any>('get_task', { id });
+      
+      if (!result) {
+        return null;
+      }
+      
+      let config = { mysqlConfig: undefined, esConfig: undefined, syncConfig: {} };
+      
+      try {
+        if (result.config) {
+          config = JSON.parse(result.config);
+        }
+      } catch (e) {
+        console.error('解析任务配置失败:', e);
+      }
+      
+      const task: SyncTask = {
+        id: result.id,
+        name: result.name,
+        sourceId: result.sourceId,
+        targetId: result.targetId,
+        sourceType: result.sourceType,
+        targetType: result.targetType,
+        mysqlConfig: config.mysqlConfig,
+        esConfig: config.esConfig,
+        syncConfig: config.syncConfig || {
+          threadCount: 4,
+          batchSize: 1000,
+          errorStrategy: 'skip',
+          tableExistsStrategy: 'drop'
+        },
+        status: result.status,
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt
+      };
+      
+      currentTask.value = task;
+      return task;
     } catch (e) {
       error.value = `获取任务失败: ${e}`;
       console.error('getTask error:', e);
@@ -68,7 +135,32 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
     error.value = null;
     
     try {
-      const id = await invoke<string>('create_task', { task });
+      // 生成 UUID
+      const id = crypto.randomUUID();
+      const now = Date.now();
+      
+      // 构建配置对象
+      const config = {
+        mysqlConfig: task.mysqlConfig,
+        esConfig: task.esConfig,
+        syncConfig: task.syncConfig
+      };
+      
+      // 构建后端期望的 SyncTask 格式
+      const backendTask = {
+        id,
+        name: task.name,
+        sourceId: task.sourceId,
+        targetId: task.targetId,
+        sourceType: task.sourceType,
+        targetType: task.targetType,
+        config: JSON.stringify(config),
+        status: task.status,
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      await invoke('create_task', { task: backendTask });
       await fetchTasks(); // 刷新列表
       return id;
     } catch (e) {
@@ -88,7 +180,30 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
     error.value = null;
     
     try {
-      await invoke('update_task', { id, task });
+      const now = Date.now();
+      
+      // 构建配置对象
+      const config = {
+        mysqlConfig: task.mysqlConfig,
+        esConfig: task.esConfig,
+        syncConfig: task.syncConfig
+      };
+      
+      // 构建后端期望的 SyncTask 格式
+      const backendTask = {
+        id,
+        name: task.name,
+        sourceId: task.sourceId,
+        targetId: task.targetId,
+        sourceType: task.sourceType,
+        targetType: task.targetType,
+        config: JSON.stringify(config),
+        status: task.status,
+        createdAt: task.createdAt || now,
+        updatedAt: now
+      };
+      
+      await invoke('update_task', { id, task: backendTask });
       await fetchTasks(); // 刷新列表
     } catch (e) {
       error.value = `更新任务失败: ${e}`;

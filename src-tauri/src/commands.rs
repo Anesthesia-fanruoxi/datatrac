@@ -27,6 +27,7 @@ pub struct AppState {
 
 /// 创建数据源的请求数据
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateDataSourceRequest {
     pub name: String,
     #[serde(rename = "type")]
@@ -358,4 +359,13 @@ pub async fn get_errors(
     state: State<'_, AppState>,
 ) -> Result<Vec<ErrorLog>, String> {
     Ok(state.error_logger.get_errors(&task_id))
+}
+
+/// 获取任务日志
+#[tauri::command]
+pub async fn get_task_logs(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::progress::LogEntry>, String> {
+    Ok(state.progress_monitor.get_logs(&task_id))
 }

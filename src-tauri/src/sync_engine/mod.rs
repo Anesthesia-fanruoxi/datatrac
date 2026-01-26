@@ -81,7 +81,15 @@ impl SyncEngine {
     pub async fn start_sync(&self, config: SyncTaskConfig) -> Result<()> {
         let task_id = config.task_id.clone();
 
+        log::info!("========================================");
+        log::info!("开始启动同步任务: {}", task_id);
+        log::info!("同步方向: {:?}", config.sync_direction);
+        log::info!("线程数: {}, 批量大小: {}", config.sync_config.thread_count, config.sync_config.batch_size);
+        log::info!("错误策略: {:?}", config.sync_config.error_strategy);
+        log::info!("========================================");
+
         if self.is_task_running(&task_id) {
+            log::warn!("任务 {} 已在运行中，无法重复启动", task_id);
             anyhow::bail!("任务已在运行中");
         }
 
@@ -97,12 +105,25 @@ impl SyncEngine {
         }
 
         self.error_logger.clear_errors(&task_id);
+        log::info!("任务 {} 状态已初始化，开始执行同步", task_id);
 
         let result = match config.sync_direction {
-            SyncDirection::MysqlToEs => self.sync_mysql_to_es(config).await,
-            SyncDirection::EsToMysql => self.sync_es_to_mysql(config).await,
-            SyncDirection::MysqlToMysql => self.sync_mysql_to_mysql(config).await,
-            SyncDirection::EsToEs => self.sync_es_to_es(config).await,
+            SyncDirection::MysqlToEs => {
+                log::info!("执行 MySQL -> Elasticsearch 同步");
+                self.sync_mysql_to_es(config).await
+            },
+            SyncDirection::EsToMysql => {
+                log::info!("执行 Elasticsearch -> MySQL 同步");
+                self.sync_es_to_mysql(config).await
+            },
+            SyncDirection::MysqlToMysql => {
+                log::info!("执行 MySQL -> MySQL 同步");
+                self.sync_mysql_to_mysql(config).await
+            },
+            SyncDirection::EsToEs => {
+                log::info!("执行 Elasticsearch -> Elasticsearch 同步");
+                self.sync_es_to_es(config).await
+            },
         };
 
         {
@@ -113,8 +134,18 @@ impl SyncEngine {
         }
 
         match &result {
-            Ok(_) => self.progress_monitor.complete_task(&task_id),
-            Err(e) => self.progress_monitor.fail_task(&task_id, &e.to_string()),
+            Ok(_) => {
+                log::info!("========================================");
+                log::info!("任务 {} 同步完成", task_id);
+                log::info!("========================================");
+                self.progress_monitor.complete_task(&task_id)
+            },
+            Err(e) => {
+                log::error!("========================================");
+                log::error!("任务 {} 同步失败: {}", task_id, e);
+                log::error!("========================================");
+                self.progress_monitor.fail_task(&task_id, &e.to_string())
+            },
         }
 
         result
@@ -122,11 +153,15 @@ impl SyncEngine {
 
     /// 暂停同步任务
     pub async fn pause_sync(&self, task_id: &str) -> Result<()> {
+        log::info!("暂停任务: {}", task_id);
+        
         if !self.is_task_running(task_id) {
+            log::warn!("任务 {} 未在运行中，无法暂停", task_id);
             anyhow::bail!("任务未在运行中");
         }
 
         if self.is_task_paused(task_id) {
+            log::warn!("任务 {} 已处于暂停状态", task_id);
             anyhow::bail!("任务已处于暂停状态");
         }
 
@@ -141,19 +176,25 @@ impl SyncEngine {
             }
 
             self.progress_monitor.pause_task(task_id);
+            log::info!("任务 {} 已暂停", task_id);
             Ok(())
         } else {
+            log::error!("任务 {} 状态不存在", task_id);
             anyhow::bail!("任务状态不存在");
         }
     }
 
     /// 恢复同步任务
     pub async fn resume_sync(&self, task_id: &str) -> Result<()> {
+        log::info!("恢复任务: {}", task_id);
+        
         if !self.is_task_running(task_id) {
+            log::warn!("任务 {} 未在运行中，无法恢复", task_id);
             anyhow::bail!("任务未在运行中");
         }
 
         if !self.is_task_paused(task_id) {
+            log::warn!("任务 {} 未处于暂停状态", task_id);
             anyhow::bail!("任务未处于暂停状态");
         }
 
@@ -168,8 +209,10 @@ impl SyncEngine {
             }
 
             self.progress_monitor.resume_task(task_id);
+            log::info!("任务 {} 已恢复", task_id);
             Ok(())
         } else {
+            log::error!("任务 {} 状态不存在", task_id);
             anyhow::bail!("任务状态不存在");
         }
     }
@@ -240,6 +283,38 @@ impl SyncEngine {
                 DataSourceType::Mysql => 1000,
                 DataSourceType::Elasticsearch => 500,
             }
+        }
+    }
+
+    /// 转换数据库名称
+    /// 
+    /// 根据配置的转换规则，将源数据库名称转换为目标数据库名称
+    fn transform_database_name(&self, original_name: &str, transform: &Option<DbNameTransform>) -> String {
+        if let Some(t) = transform {
+            if !t.enabled {
+                return original_name.to_string();
+            }
+
+            match t.mode {
+                TransformMode::Prefix => {
+                    // 前缀替换
+                    if original_name.starts_with(&t.source_pattern) {
+                        format!("{}{}", t.target_pattern, &original_name[t.source_pattern.len()..])
+                    } else {
+                        original_name.to_string()
+                    }
+                }
+                TransformMode::Suffix => {
+                    // 后缀替换
+                    if original_name.ends_with(&t.source_pattern) {
+                        format!("{}{}", &original_name[..original_name.len() - t.source_pattern.len()], t.target_pattern)
+                    } else {
+                        original_name.to_string()
+                    }
+                }
+            }
+        } else {
+            original_name.to_string()
         }
     }
 }
