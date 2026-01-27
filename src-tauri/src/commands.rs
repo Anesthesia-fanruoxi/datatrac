@@ -302,14 +302,14 @@ pub async fn delete_task(
 /// 启动同步任务
 #[tauri::command]
 pub async fn start_sync(
-    config: SyncTaskConfig,
+    task_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // 在后台启动同步任务
     let engine = state.sync_engine.clone();
     
     tokio::spawn(async move {
-        if let Err(e) = engine.start_sync(config).await {
+        if let Err(e) = engine.start_sync_by_id(&task_id).await {
             log::error!("同步任务执行失败: {}", e);
         }
     });

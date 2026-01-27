@@ -59,6 +59,17 @@ pub struct IndexMatchResult {
     pub preview: Vec<String>, // 前 10 个匹配的索引
 }
 
+/// 索引列表结果（支持分页）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexListResult {
+    pub total: usize,           // 总数
+    pub page: usize,            // 当前页（从 1 开始）
+    pub page_size: usize,       // 每页大小
+    pub total_pages: usize,     // 总页数
+    pub indices: Vec<String>,   // 当前页的索引列表
+}
+
 /// 数据源管理器
 /// 
 /// 负责：
@@ -634,11 +645,13 @@ impl DataSourceManager {
             Elasticsearch, 
             http::transport::{SingleNodeConnectionPool, TransportBuilder},
             auth::Credentials,
-            cat::CatIndicesParts,
+            indices::IndicesGetSettingsParts,
         };
         use url::Url;
         
         let url_str = format!("http://{}:{}", ds.host, ds.port);
+        log::info!("ES URL: {}", url_str);
+        
         let url = Url::parse(&url_str)
             .context("无效的 URL 格式")?;
         let conn_pool = SingleNodeConnectionPool::new(url);
@@ -650,26 +663,45 @@ impl DataSourceManager {
             .context("创建 Elasticsearch 传输层失败")?;
         let client = Elasticsearch::new(transport);
         
-        // 获取索引列表
+        log::info!("准备发送请求: GET /*/_settings");
+        
+        // 使用 */_settings API 获取所有索引
         let response = client
-            .cat()
-            .indices(CatIndicesParts::None)
-            .format("json")
+            .indices()
+            .get_settings(IndicesGetSettingsParts::Index(&["*"]))
             .send()
             .await
             .context("查询索引列表失败")?;
         
-        let body = response.json::<Vec<serde_json::Value>>().await
-            .context("解析索引列表响应失败")?;
+        let status = response.status_code();
+        log::info!("响应状态码: {}", status);
         
-        let indices: Vec<String> = body
-            .iter()
-            .filter_map(|item| {
-                item.get("index")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            })
-            .collect();
+        let response_text = response.text().await
+            .context("读取响应文本失败")?;
+        
+        // 检查状态码
+        if !status.is_success() {
+            anyhow::bail!("ES 返回错误状态码 {}: {}", status, response_text);
+        }
+        
+        // 解析 JSON - _settings API 返回的是一个对象，key 是索引名
+        let body: serde_json::Value = serde_json::from_str(&response_text)
+            .context(format!("解析索引列表响应失败，响应内容: {}", response_text))?;
+        
+        let mut indices: Vec<String> = Vec::new();
+        if let Some(obj) = body.as_object() {
+            for (index_name, _) in obj {
+                // 过滤掉系统索引（以 . 开头的）
+                if !index_name.starts_with('.') {
+                    indices.push(index_name.clone());
+                }
+            }
+        }
+        
+        // 按字母顺序排序
+        indices.sort();
+        
+        log::info!("找到 {} 个索引", indices.len());
         
         Ok(indices)
     }
@@ -678,32 +710,145 @@ impl DataSourceManager {
     /// 
     /// # 参数
     /// * `id` - 数据源 ID
-    /// * `pattern` - 通配符模式（例如：logs-*）
+    /// * `pattern` - 通配符模式（例如：logs-*，支持 * 和 ?）
     pub async fn match_indices(&self, id: &str, pattern: &str) -> Result<IndexMatchResult> {
-        let all_indices = self.get_indices(id).await?;
+        let ds = self.get_data_source(id).await?
+            .ok_or_else(|| anyhow::anyhow!("数据源不存在: {}", id))?;
         
-        // 将通配符模式转换为正则表达式
-        let regex_pattern = pattern
-            .replace(".", "\\.")
-            .replace("*", ".*")
-            .replace("?", ".");
+        if ds.source_type != DataSourceType::Elasticsearch {
+            anyhow::bail!("只有 Elasticsearch 数据源支持获取索引列表");
+        }
         
-        let regex = regex::Regex::new(&format!("^{}$", regex_pattern))
-            .context("无效的通配符模式")?;
+        use elasticsearch::{
+            Elasticsearch, 
+            http::transport::{SingleNodeConnectionPool, TransportBuilder},
+            auth::Credentials,
+            indices::IndicesGetSettingsParts,
+        };
+        use url::Url;
         
-        // 匹配索引
-        let matched: Vec<String> = all_indices
-            .into_iter()
-            .filter(|index| regex.is_match(index))
-            .collect();
+        let url_str = format!("http://{}:{}", ds.host, ds.port);
+        log::info!("ES URL: {}", url_str);
+        log::info!("搜索模式: {}", pattern);
+        
+        let url = Url::parse(&url_str)
+            .context("无效的 URL 格式")?;
+        let conn_pool = SingleNodeConnectionPool::new(url);
+        let credentials = Credentials::Basic(ds.username.clone(), ds.password.clone());
+        
+        let transport = TransportBuilder::new(conn_pool)
+            .auth(credentials)
+            .build()
+            .context("创建 Elasticsearch 传输层失败")?;
+        let client = Elasticsearch::new(transport);
+        
+        log::info!("准备发送请求: GET /{}/_settings", pattern);
+        
+        // 使用 /{pattern}/_settings API 查询匹配的索引
+        let response = client
+            .indices()
+            .get_settings(IndicesGetSettingsParts::Index(&[pattern]))
+            .send()
+            .await
+            .context("查询索引列表失败")?;
+        
+        let status = response.status_code();
+        log::info!("响应状态码: {}", status);
+        
+        let response_text = response.text().await
+            .context("读取响应文本失败")?;
+        
+        log::info!("响应内容（前 500 字符）: {}", 
+            if response_text.len() > 500 { 
+                &response_text[..500] 
+            } else { 
+                &response_text 
+            }
+        );
+        
+        // 检查状态码
+        if !status.is_success() {
+            anyhow::bail!("ES 返回错误状态码 {}: {}", status, response_text);
+        }
+        
+        // 解析 JSON - _settings API 返回的是一个对象，key 是索引名
+        let body: serde_json::Value = serde_json::from_str(&response_text)
+            .context(format!("解析索引列表响应失败，响应内容: {}", response_text))?;
+        
+        let mut matched: Vec<String> = Vec::new();
+        if let Some(obj) = body.as_object() {
+            for (index_name, _) in obj {
+                // 过滤掉系统索引（以 . 开头的）
+                if !index_name.starts_with('.') {
+                    matched.push(index_name.clone());
+                }
+            }
+        }
+        
+        // 按字母顺序排序
+        matched.sort();
         
         let count = matched.len();
-        let preview = matched.iter().take(10).cloned().collect();
+        let preview = matched.clone();
+        
+        log::info!("找到 {} 个匹配的索引", count);
         
         Ok(IndexMatchResult {
             pattern: pattern.to_string(),
             count,
             preview,
+        })
+    }
+
+    /// 获取 ES 索引列表（支持搜索和分页）
+    /// 
+    /// # 参数
+    /// * `id` - 数据源 ID
+    /// * `search` - 搜索关键词（可选）
+    /// * `page` - 页码（从 1 开始，可选，默认 1）
+    /// * `page_size` - 每页大小（可选，默认 20）
+    pub async fn get_indices_with_pagination(
+        &self,
+        id: &str,
+        search: Option<String>,
+        page: Option<usize>,
+        page_size: Option<usize>,
+    ) -> Result<IndexListResult> {
+        // 获取所有索引
+        let all_indices = self.get_indices(id).await?;
+        
+        // 过滤索引（如果有搜索关键词）
+        let filtered_indices: Vec<String> = if let Some(keyword) = search {
+            let keyword_lower = keyword.to_lowercase();
+            all_indices
+                .into_iter()
+                .filter(|index| index.to_lowercase().contains(&keyword_lower))
+                .collect()
+        } else {
+            all_indices
+        };
+        
+        let total = filtered_indices.len();
+        let page = page.unwrap_or(1).max(1);
+        let page_size = page_size.unwrap_or(20).max(1);
+        let total_pages = (total as f64 / page_size as f64).ceil() as usize;
+        
+        // 计算分页
+        let start = (page - 1) * page_size;
+        let end = (start + page_size).min(total);
+        
+        let indices = if start < total {
+            filtered_indices[start..end].to_vec()
+        } else {
+            Vec::new()
+        };
+        
+        Ok(IndexListResult {
+            total,
+            page,
+            page_size,
+            total_pages,
+            indices,
         })
     }
 

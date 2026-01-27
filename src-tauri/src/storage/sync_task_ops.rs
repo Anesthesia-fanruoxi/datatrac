@@ -10,6 +10,12 @@ impl Storage {
     /// 
     /// 如果任务 ID 已存在，则更新；否则插入新记录
     pub async fn save_task(&self, task: &SyncTask) -> Result<()> {
+        log::info!("save_task - 准备保存任务: id={}, name={}", task.id, task.name);
+        log::info!("save_task - source_id={}, target_id={}", task.source_id, task.target_id);
+        log::info!("save_task - source_type={}, target_type={}", task.source_type.as_str(), task.target_type.as_str());
+        log::info!("save_task - config={}", task.config);
+        log::info!("save_task - status={}", task.status.as_str());
+        
         sqlx::query(
             r#"
             INSERT INTO sync_tasks (
@@ -40,6 +46,8 @@ impl Storage {
         .await
         .context("保存同步任务失败")?;
 
+        log::info!("save_task - 保存成功");
+        
         Ok(())
     }
 

@@ -265,27 +265,6 @@ function getStep2Status(dataSourceId: string): 'wait' | 'loading' | 'success' | 
   return 'wait'
 }
 
-// 按步骤分组的结果（保留用于进度计算）
-const step1Results = computed(() => {
-  return results.value
-    .filter(r => r.steps.length >= 1)
-    .map(r => ({
-      dataSourceId: r.dataSourceId,
-      dataSourceName: r.dataSourceName,
-      step: r.steps[0]
-    }))
-})
-
-const step2Results = computed(() => {
-  return results.value
-    .filter(r => r.steps.length >= 2)
-    .map(r => ({
-      dataSourceId: r.dataSourceId,
-      dataSourceName: r.dataSourceName,
-      step: r.steps[1]
-    }))
-})
-
 const successCount = computed(() => 
   results.value.filter(r => r.success).length
 )
@@ -307,12 +286,6 @@ const overallStatus = computed<'default' | 'success' | 'error' | 'warning'>(() =
   if (successCount.value > 0) return 'success'
   return 'default'
 })
-
-function getResultColor(result: BatchTestDataSourceResult) {
-  if (result.success) return '#18a058'
-  if (result.steps.length > 0 && !result.success) return '#d03050'
-  return '#808080'
-}
 
 function handleClose() {
   show.value = false

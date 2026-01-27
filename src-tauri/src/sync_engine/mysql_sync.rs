@@ -73,8 +73,6 @@ impl SyncEngine {
         // 删除表（如果存在）
         let drop_query = format!("DROP TABLE IF EXISTS `{}`.`{}`", database, table);
         
-        log::info!("删除表: {}.{}", database, table);
-        
         sqlx::query(&drop_query)
             .execute(pool)
             .await
@@ -105,8 +103,6 @@ impl SyncEngine {
         create_sql.push(')');
         create_sql.push_str(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-        log::info!("创建表: {}.{} ({} 列)", database, table, schema.columns.len());
-        
         // 创建表
         sqlx::query(&create_sql)
             .execute(pool)
@@ -146,15 +142,11 @@ impl SyncEngine {
 
         match strategy {
             TableExistsStrategy::Drop => {
-                if table_exists {
-                    log::info!("目标表已存在，执行删除策略: {}.{}", database, table);
-                }
                 // 删除并重建（默认行为）
                 self.drop_and_create_mysql_table(pool, database, table, schema).await?;
             }
             TableExistsStrategy::Truncate => {
                 if table_exists {
-                    log::info!("目标表已存在，执行清空策略: {}.{}", database, table);
                     // 清空表数据
                     let truncate_query = format!("TRUNCATE TABLE `{}`.`{}`", database, table);
                     sqlx::query(&truncate_query)
@@ -162,7 +154,6 @@ impl SyncEngine {
                         .await
                         .context("清空表失败")?;
                 } else {
-                    log::info!("目标表不存在，创建新表: {}.{}", database, table);
                     // 表不存在，创建新表
                     self.drop_and_create_mysql_table(pool, database, table, schema).await?;
                 }
@@ -173,9 +164,6 @@ impl SyncEngine {
                     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
                     let backup_table = format!("{}_backup_{}", table, timestamp);
                     
-                    log::info!("目标表已存在，执行备份策略: {}.{} -> {}.{}", 
-                        database, table, database, backup_table);
-                    
                     let rename_query = format!(
                         "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
                         database, table, database, backup_table
@@ -184,8 +172,6 @@ impl SyncEngine {
                         .execute(pool)
                         .await
                         .context("备份表失败")?;
-                } else {
-                    log::info!("目标表不存在，创建新表: {}.{}", database, table);
                 }
                 // 创建新表
                 self.drop_and_create_mysql_table(pool, database, table, schema).await?;
@@ -304,6 +290,8 @@ impl SyncEngine {
     }
 
     /// 批量插入数据到 MySQL（根据表结构直接绑定对应类型）
+    /// 
+    /// 注意：MySQL 单个语句最多支持 65535 个参数，如果数据量过大，会自动分批插入
     pub(super) async fn batch_insert_mysql_raw(
         &self,
         pool: &MySqlPool,
@@ -316,6 +304,43 @@ impl SyncEngine {
             return Ok(());
         }
 
+        // 获取列名
+        let columns: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
+        let column_count = columns.len();
+        
+        // MySQL 单个语句最多支持 65535 个参数
+        // 计算每批最多能处理多少行
+        const MAX_PLACEHOLDERS: usize = 65535;
+        let max_rows_per_batch = if column_count > 0 {
+            MAX_PLACEHOLDERS / column_count
+        } else {
+            rows.len()
+        };
+        
+        // 如果数据量过大，分批插入
+        if rows.len() > max_rows_per_batch {
+            for (batch_idx, chunk) in rows.chunks(max_rows_per_batch).enumerate() {
+                self.insert_mysql_chunk_raw(pool, database, table, chunk, schema)
+                    .await
+                    .context(format!("插入第 {} 批数据失败", batch_idx + 1))?;
+            }
+            
+            return Ok(());
+        }
+
+        // 数据量在限制内，直接插入
+        self.insert_mysql_chunk_raw(pool, database, table, rows, schema).await
+    }
+
+    /// 插入单个数据块到 MySQL
+    async fn insert_mysql_chunk_raw(
+        &self,
+        pool: &MySqlPool,
+        database: &str,
+        table: &str,
+        rows: &[sqlx::mysql::MySqlRow],
+        schema: &TableSchema,
+    ) -> Result<()> {
         // 获取列名
         let columns: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
         
@@ -347,7 +372,17 @@ impl SyncEngine {
         // 遍历每一行，根据字段类型绑定值
         for row in rows {
             for (col_idx, col_def) in schema.columns.iter().enumerate() {
-                let value_ref = row.try_get_raw(col_idx)?;
+                let value_ref = row.try_get_raw(col_idx);
+                
+                // 处理可能的错误
+                let value_ref = match value_ref {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::warn!("读取列 {} 失败: {}", col_def.name, e);
+                        query = query.bind(None::<String>);
+                        continue;
+                    }
+                };
                 
                 // 如果是 NULL，直接绑定 NULL
                 if value_ref.is_null() {
@@ -359,94 +394,160 @@ impl SyncEngine {
                 let data_type = col_def.data_type.to_lowercase();
                 let is_unsigned = data_type.contains("unsigned");
                 
-                // 添加调试日志
-                log::debug!("处理列 {} (索引 {}): 类型 = {}", col_def.name, col_idx, data_type);
-                
                 // 先检查 ENUM 和 SET 类型（必须在其他类型之前，因为它们可能包含其他关键字）
                 if data_type.starts_with("enum(") || data_type.starts_with("set(") {
                     // ENUM 和 SET 类型作为字符串处理
-                    query = query.bind(row.try_get::<String, _>(col_idx)?);
+                    match row.try_get::<String, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<String>),
+                    }
                 }
                 // JSON 类型（必须在其他类型之前检查）
                 else if data_type.starts_with("json") {
-                    // JSON 类型作为字符串处理
-                    query = query.bind(row.try_get::<String, _>(col_idx)?);
+                    // JSON 类型使用 serde_json::Value
+                    match row.try_get::<serde_json::Value, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => {
+                            // 如果直接读取失败，尝试作为字符串读取然后解析
+                            match row.try_get::<String, _>(col_idx) {
+                                Ok(s) => {
+                                    let json_value = serde_json::from_str(&s)
+                                        .unwrap_or(serde_json::Value::String(s));
+                                    query = query.bind(json_value);
+                                }
+                                Err(_) => query = query.bind(None::<String>),
+                            }
+                        }
+                    }
                 }
                 // 时间类型（使用 starts_with 避免误匹配）
                 else if data_type.starts_with("timestamp") {
                     // TIMESTAMP 使用 DateTime<Utc>
-                    query = query.bind(row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_idx)?);
+                    match row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<chrono::DateTime<chrono::Utc>>),
+                    }
                 } else if data_type.starts_with("datetime") {
                     // DATETIME 使用 NaiveDateTime
-                    query = query.bind(row.try_get::<chrono::NaiveDateTime, _>(col_idx)?);
+                    match row.try_get::<chrono::NaiveDateTime, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<chrono::NaiveDateTime>),
+                    }
                 } else if data_type.starts_with("date") {
                     // DATE 使用 NaiveDate
-                    query = query.bind(row.try_get::<chrono::NaiveDate, _>(col_idx)?);
+                    match row.try_get::<chrono::NaiveDate, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<chrono::NaiveDate>),
+                    }
                 } else if data_type.starts_with("time") {
                     // TIME 使用 NaiveTime
-                    query = query.bind(row.try_get::<chrono::NaiveTime, _>(col_idx)?);
+                    match row.try_get::<chrono::NaiveTime, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<chrono::NaiveTime>),
+                    }
                 } else if data_type.starts_with("year") {
                     // YEAR 类型：读取时已转换为 INT，这里用 i32 读取，绑定时转回 i16
-                    // MySQL YEAR 范围是 1901-2155，用 i16 足够
-                    log::debug!("检测到 YEAR 类型，列 {}: {}", col_def.name, data_type);
-                    let year_value: i32 = row.try_get(col_idx)?;
-                    log::debug!("YEAR 值: {}", year_value);
-                    query = query.bind(year_value as i16);
+                    match row.try_get::<i32, _>(col_idx) {
+                        Ok(v) => query = query.bind(v as i16),
+                        Err(_) => query = query.bind(None::<i16>),
+                    }
                 }
                 // 布尔类型（必须在 tinyint 之前检查）
                 else if data_type.starts_with("tinyint(1)") || data_type.starts_with("bool") {
-                    query = query.bind(row.try_get::<bool, _>(col_idx)?);
+                    match row.try_get::<bool, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<bool>),
+                    }
                 }
                 // 整数类型（按从大到小的顺序检查，避免误匹配）
                 else if data_type.starts_with("bigint") {
                     if is_unsigned {
-                        query = query.bind(row.try_get::<u64, _>(col_idx)?);
+                        match row.try_get::<u64, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<u64>),
+                        }
                     } else {
-                        query = query.bind(row.try_get::<i64, _>(col_idx)?);
+                        match row.try_get::<i64, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<i64>),
+                        }
                     }
                 } else if data_type.starts_with("mediumint") {
-                    // MEDIUMINT 用 i32/u32
                     if is_unsigned {
-                        query = query.bind(row.try_get::<u32, _>(col_idx)?);
+                        match row.try_get::<u32, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<u32>),
+                        }
                     } else {
-                        query = query.bind(row.try_get::<i32, _>(col_idx)?);
+                        match row.try_get::<i32, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<i32>),
+                        }
                     }
                 } else if data_type.starts_with("int") {
-                    // INT 用 i32/u32
                     if is_unsigned {
-                        query = query.bind(row.try_get::<u32, _>(col_idx)?);
+                        match row.try_get::<u32, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<u32>),
+                        }
                     } else {
-                        query = query.bind(row.try_get::<i32, _>(col_idx)?);
+                        match row.try_get::<i32, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<i32>),
+                        }
                     }
                 } else if data_type.starts_with("smallint") {
                     if is_unsigned {
-                        query = query.bind(row.try_get::<u16, _>(col_idx)?);
+                        match row.try_get::<u16, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<u16>),
+                        }
                     } else {
-                        query = query.bind(row.try_get::<i16, _>(col_idx)?);
+                        match row.try_get::<i16, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<i16>),
+                        }
                     }
                 } else if data_type.starts_with("tinyint") {
                     if is_unsigned {
-                        query = query.bind(row.try_get::<u8, _>(col_idx)?);
+                        match row.try_get::<u8, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<u8>),
+                        }
                     } else {
-                        query = query.bind(row.try_get::<i8, _>(col_idx)?);
+                        match row.try_get::<i8, _>(col_idx) {
+                            Ok(v) => query = query.bind(v),
+                            Err(_) => query = query.bind(None::<i8>),
+                        }
                     }
                 }
                 // BIT 类型
                 else if data_type.starts_with("bit") {
-                    // BIT 类型用 u64
-                    query = query.bind(row.try_get::<u64, _>(col_idx)?);
+                    match row.try_get::<u64, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<u64>),
+                    }
                 }
                 // 浮点类型
                 else if data_type.starts_with("double") || data_type.starts_with("decimal") || data_type.starts_with("numeric") {
-                    query = query.bind(row.try_get::<f64, _>(col_idx)?);
+                    match row.try_get::<f64, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<f64>),
+                    }
                 } else if data_type.starts_with("float") {
-                    query = query.bind(row.try_get::<f32, _>(col_idx)?);
+                    match row.try_get::<f32, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<f32>),
+                    }
                 }
                 // 二进制类型
                 else if data_type.starts_with("blob") 
                     || data_type.starts_with("binary") 
                     || data_type.starts_with("varbinary") {
-                    query = query.bind(row.try_get::<Vec<u8>, _>(col_idx)?);
+                    match row.try_get::<Vec<u8>, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<Vec<u8>>),
+                    }
                 }
                 // 空间类型（所有空间类型都作为二进制处理）
                 else if data_type.starts_with("geometry")
@@ -457,11 +558,17 @@ impl SyncEngine {
                     || data_type.starts_with("multilinestring")
                     || data_type.starts_with("multipolygon")
                     || data_type.starts_with("geometrycollection") {
-                    query = query.bind(row.try_get::<Vec<u8>, _>(col_idx)?);
+                    match row.try_get::<Vec<u8>, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<Vec<u8>>),
+                    }
                 }
                 // 字符串类型（VARCHAR, TEXT, CHAR 等，作为默认类型）
                 else {
-                    query = query.bind(row.try_get::<String, _>(col_idx)?);
+                    match row.try_get::<String, _>(col_idx) {
+                        Ok(v) => query = query.bind(v),
+                        Err(_) => query = query.bind(None::<String>),
+                    }
                 }
             }
         }
@@ -470,15 +577,42 @@ impl SyncEngine {
         match query.execute(pool).await {
             Ok(_) => Ok(()),
             Err(e) => {
-                log::error!("批量插入失败，表: {}.{}, 列: {}", 
-                    database, table, columns.join(", "));
-                log::error!("数据库错误: {}", e);
-                Err(anyhow::anyhow!("批量插入失败: {}", e))
+                // 检查是否是主键重复错误
+                let error_message = e.to_string();
+                if error_message.contains("1062") && error_message.contains("Duplicate entry") {
+                    // 提取重复的主键值
+                    let duplicate_key = error_message
+                        .split("'")
+                        .nth(1)
+                        .unwrap_or("unknown");
+                    
+                    log::error!("主键重复错误: {}.{}", database, table);
+                    log::error!("重复的主键值: {}", duplicate_key);
+                    log::error!("错误详情: {}", error_message);
+                    log::error!("");
+                    log::error!("问题原因:");
+                    log::error!("  1. 目标表 {} 已包含主键为 '{}' 的数据", table, duplicate_key);
+                    log::error!("  2. 或者源表中有多行数据的主键都是 '{}'", duplicate_key);
+                    log::error!("");
+                    log::error!("解决方案:");
+                    log::error!("  1. 检查同步任务配置中的'表存在策略'");
+                    log::error!("  2. 如果目标表已有数据，使用'Drop'（删除重建）或'Truncate'（清空）策略");
+                    log::error!("  3. 如果使用'Keep'策略，需要确保源数据没有重复主键");
+                    log::error!("  4. 检查源表 {} 的数据，确认主键 '{}' 是否重复", table, duplicate_key);
+                    Err(anyhow::anyhow!("主键重复错误: {}.{} - 重复的主键值: {}", database, table, duplicate_key))
+                } else {
+                    log::error!("批量插入失败，表: {}.{}, 列: {}", 
+                        database, table, columns.join(", "));
+                    log::error!("数据库错误: {}", e);
+                    Err(anyhow::anyhow!("批量插入失败: {}", e))
+                }
             }
         }
     }
 
     /// 批量插入数据到 MySQL（JSON 格式，用于 ES 同步）
+    /// 
+    /// 注意：MySQL 单个语句最多支持 65535 个参数，如果数据量过大，会自动分批插入
     pub(super) async fn batch_insert_mysql(
         &self,
         pool: &MySqlPool,
@@ -490,6 +624,42 @@ impl SyncEngine {
             return Ok(());
         }
 
+        // 获取列名
+        let columns: Vec<String> = batch[0].keys().cloned().collect();
+        let column_count = columns.len();
+        
+        // MySQL 单个语句最多支持 65535 个参数
+        // 计算每批最多能处理多少行
+        const MAX_PLACEHOLDERS: usize = 65535;
+        let max_rows_per_batch = if column_count > 0 {
+            MAX_PLACEHOLDERS / column_count
+        } else {
+            batch.len()
+        };
+        
+        // 如果数据量过大，分批插入
+        if batch.len() > max_rows_per_batch {
+            for (batch_idx, chunk) in batch.chunks(max_rows_per_batch).enumerate() {
+                self.insert_mysql_chunk(pool, database, table, &chunk.to_vec())
+                    .await
+                    .context(format!("插入第 {} 批数据失败", batch_idx + 1))?;
+            }
+            
+            return Ok(());
+        }
+
+        // 数据量在限制内，直接插入
+        self.insert_mysql_chunk(pool, database, table, batch).await
+    }
+
+    /// 插入单个数据块到 MySQL（JSON 格式）
+    async fn insert_mysql_chunk(
+        &self,
+        pool: &MySqlPool,
+        database: &str,
+        table: &str,
+        batch: &BatchData,
+    ) -> Result<()> {
         // 获取列名
         let columns: Vec<String> = batch[0].keys().cloned().collect();
         
@@ -545,7 +715,8 @@ impl SyncEngine {
                         query = query.bind(s);
                     }
                     serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-                        query = query.bind(value.to_string());
+                        // JSON 数组和对象直接绑定为 Value，而不是字符串
+                        query = query.bind(value.clone());
                     }
                 }
             }

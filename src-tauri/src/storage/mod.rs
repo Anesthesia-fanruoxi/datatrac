@@ -77,16 +77,14 @@ impl Storage {
             CREATE TABLE IF NOT EXISTS sync_tasks (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                target_id TEXT NOT NULL,
+                source_id TEXT,
+                target_id TEXT,
                 source_type TEXT NOT NULL,
                 target_type TEXT NOT NULL,
                 config TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (source_id) REFERENCES data_sources(id),
-                FOREIGN KEY (target_id) REFERENCES data_sources(id)
+                updated_at TEXT NOT NULL
             )
             "#,
         )

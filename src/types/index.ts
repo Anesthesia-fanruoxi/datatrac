@@ -10,6 +10,11 @@
 export type DataSourceType = 'mysql' | 'elasticsearch';
 
 /**
+ * 任务类型（数据源组合）
+ */
+export type SyncTaskType = 'mysql-mysql' | 'mysql-es' | 'es-mysql' | 'es-es';
+
+/**
  * 数据源接口
  */
 export interface DataSource {
@@ -95,6 +100,24 @@ export interface IndexSelection {
 }
 
 /**
+ * ES 搜索条件组
+ */
+export interface ESSearchGroup {
+  pattern: string;           // 搜索条件
+  matchedIndices: string[];  // 匹配的索引
+}
+
+/**
+ * 索引名称转换配置
+ */
+export interface IndexNameTransform {
+  enabled: boolean;
+  mode: 'prefix' | 'suffix';
+  sourcePattern: string;
+  targetPattern: string;
+}
+
+/**
  * 数据库名称转换配置
  */
 export interface DbNameTransform {
@@ -138,7 +161,10 @@ export interface SyncTask {
   
   // ES 配置
   esConfig?: {
-    indices: IndexSelection[];
+    searchGroups?: ESSearchGroup[];  // 搜索条件组（新方案）
+    selectedIndices?: string[];      // 最终选择的索引（新方案）
+    indices?: IndexSelection[];      // 旧方案，保持兼容
+    indexNameTransform?: IndexNameTransform; // 索引名称转换
   };
   
   // 同步配置
@@ -156,6 +182,17 @@ export interface IndexMatchResult {
   pattern: string;
   count: number;
   preview: string[]; // 前 10 个
+}
+
+/**
+ * 索引列表结果（支持分页）
+ */
+export interface IndexListResult {
+  total: number;        // 总数
+  page: number;         // 当前页（从 1 开始）
+  pageSize: number;     // 每页大小
+  totalPages: number;   // 总页数
+  indices: string[];    // 当前页的索引列表
 }
 
 // ==================== 任务监控相关类型 ====================

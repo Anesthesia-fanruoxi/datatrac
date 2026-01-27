@@ -37,7 +37,7 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
       
       // 转换后端数据格式为前端格式
       tasks.value = result.map(task => {
-        let config = { mysqlConfig: undefined, esConfig: undefined, syncConfig: {} };
+        let config: any = { mysqlConfig: undefined, esConfig: undefined, syncConfig: undefined };
         
         try {
           if (task.config) {
@@ -56,12 +56,14 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
           targetType: task.targetType,
           mysqlConfig: config.mysqlConfig,
           esConfig: config.esConfig,
-          syncConfig: config.syncConfig || {
-            threadCount: 4,
-            batchSize: 1000,
-            errorStrategy: 'skip',
-            tableExistsStrategy: 'drop'
-          },
+          syncConfig: config.syncConfig && Object.keys(config.syncConfig).length > 0
+            ? config.syncConfig
+            : {
+                threadCount: 4,
+                batchSize: 2500,
+                errorStrategy: 'skip' as const,
+                tableExistsStrategy: 'drop' as const
+              },
           status: task.status,
           createdAt: task.createdAt,
           updatedAt: task.updatedAt
@@ -87,7 +89,7 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         return null;
       }
       
-      let config = { mysqlConfig: undefined, esConfig: undefined, syncConfig: {} };
+      let config: any = { mysqlConfig: undefined, esConfig: undefined, syncConfig: undefined };
       
       try {
         if (result.config) {
@@ -106,12 +108,14 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         targetType: result.targetType,
         mysqlConfig: config.mysqlConfig,
         esConfig: config.esConfig,
-        syncConfig: config.syncConfig || {
-          threadCount: 4,
-          batchSize: 1000,
-          errorStrategy: 'skip',
-          tableExistsStrategy: 'drop'
-        },
+        syncConfig: config.syncConfig && Object.keys(config.syncConfig).length > 0 
+          ? config.syncConfig 
+          : {
+              threadCount: 4,
+              batchSize: 2500,
+              errorStrategy: 'skip' as const,
+              tableExistsStrategy: 'drop' as const
+            },
         status: result.status,
         createdAt: result.createdAt,
         updatedAt: result.updatedAt
@@ -189,6 +193,18 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         syncConfig: task.syncConfig
       };
       
+      console.log('updateTask - 准备更新任务:', {
+        id,
+        name: task.name,
+        sourceId: task.sourceId,
+        targetId: task.targetId,
+        sourceType: task.sourceType,
+        targetType: task.targetType,
+        mysqlConfig: task.mysqlConfig,
+        esConfig: task.esConfig,
+        syncConfig: task.syncConfig
+      });
+      
       // 构建后端期望的 SyncTask 格式
       const backendTask = {
         id,
@@ -203,7 +219,13 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         updatedAt: now
       };
       
+      console.log('updateTask - 发送到后端的数据:', backendTask);
+      console.log('updateTask - config JSON:', backendTask.config);
+      
       await invoke('update_task', { id, task: backendTask });
+      
+      console.log('updateTask - 更新成功');
+      
       await fetchTasks(); // 刷新列表
     } catch (e) {
       error.value = `更新任务失败: ${e}`;

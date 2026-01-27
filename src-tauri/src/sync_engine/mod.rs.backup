@@ -6,7 +6,10 @@ mod mysql_sync;
 mod es_sync;
 
 // 按同步类型分离的实现模块
-mod implementations;
+mod mysql_to_es_impl;
+mod es_to_mysql_impl;
+mod mysql_to_mysql_impl;
+mod es_to_es_impl;
 
 pub use types::*;
 
@@ -139,94 +142,6 @@ impl SyncEngine {
         result
     }
 
-    /// 根据任务 ID 启动同步任务（从数据库加载配置）
-    pub async fn start_sync_by_id(&self, task_id: &str) -> Result<()> {
-        log::info!("根据任务 ID 启动同步: {}", task_id);
-        
-        // 从数据库加载任务配置
-        let storage = self.source_manager.storage();
-        let task = storage.load_task(task_id).await?
-            .ok_or_else(|| anyhow::anyhow!("任务不存在: {}", task_id))?;
-        
-        log::info!("加载任务配置: name={}, source_type={:?}, target_type={:?}", 
-            task.name, task.source_type, task.target_type);
-        
-        // 解析配置 JSON
-        let config_json: serde_json::Value = serde_json::from_str(&task.config)
-            .map_err(|e| anyhow::anyhow!("解析任务配置失败: {}", e))?;
-        
-        log::info!("配置 JSON: {}", config_json);
-        
-        // 提取各部分配置
-        let mysql_config: Option<MysqlSyncConfig> = config_json.get("mysqlConfig")
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
-        
-        let es_config: Option<EsSyncConfig> = config_json.get("esConfig")
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
-        
-        let sync_config: SyncConfig = config_json.get("syncConfig")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_else(|| SyncConfig {
-                thread_count: 4,
-                batch_size: 2500,
-                error_strategy: ErrorStrategy::Skip,
-                table_exists_strategy: TableExistsStrategy::Drop,
-                db_name_transform: None,
-            });
-        
-        log::info!("解析后的配置: mysql_config={:?}, es_config={:?}, sync_config={:?}", 
-            mysql_config, es_config, sync_config);
-        
-        // 验证配置完整性
-        if task.source_id.is_empty() || task.target_id.is_empty() {
-            anyhow::bail!("任务未配置数据源，请先完成任务配置");
-        }
-        
-        // 验证是否配置了同步的表/索引
-        let has_mysql_config = mysql_config.as_ref()
-            .map(|c| !c.databases.is_empty())
-            .unwrap_or(false);
-        
-        let has_es_indices = es_config.as_ref()
-            .and_then(|c| c.indices.as_ref())
-            .map(|i| !i.is_empty())
-            .unwrap_or(false);
-        
-        let has_es_selected_indices = es_config.as_ref()
-            .and_then(|c| c.selected_indices.as_ref())
-            .map(|i| !i.is_empty())
-            .unwrap_or(false);
-        
-        if !has_mysql_config && !has_es_indices && !has_es_selected_indices {
-            anyhow::bail!("任务未配置同步的表/索引，请先完成任务配置");
-        }
-        
-        // 确定同步方向
-        let sync_direction = match (&task.source_type, &task.target_type) {
-            (DataSourceType::Mysql, DataSourceType::Elasticsearch) => SyncDirection::MysqlToEs,
-            (DataSourceType::Elasticsearch, DataSourceType::Mysql) => SyncDirection::EsToMysql,
-            (DataSourceType::Mysql, DataSourceType::Mysql) => SyncDirection::MysqlToMysql,
-            (DataSourceType::Elasticsearch, DataSourceType::Elasticsearch) => SyncDirection::EsToEs,
-        };
-        
-        // 构建同步任务配置
-        let sync_task_config = SyncTaskConfig {
-            task_id: task.id.clone(),
-            task_name: task.name.clone(),
-            source_id: task.source_id.clone(),
-            target_id: task.target_id.clone(),
-            sync_direction,
-            sync_config,
-            mysql_config,
-            es_config,
-        };
-        
-        log::info!("构建的同步配置: {:?}", sync_task_config);
-        
-        // 调用原有的 start_sync 方法
-        self.start_sync(sync_task_config).await
-    }
-
     /// 暂停同步任务
     pub async fn pause_sync(&self, task_id: &str) -> Result<()> {
         log::info!("暂停任务: {}", task_id);
@@ -299,7 +214,7 @@ impl SyncEngine {
             &DataSourceType::Elasticsearch,
             config.sync_config.batch_size
         );
-        implementations::mysql_to_es::sync_mysql_to_es(self, config).await
+        mysql_to_es_impl::sync_mysql_to_es_impl(self, config).await
     }
 
     async fn sync_es_to_mysql(&self, mut config: SyncTaskConfig) -> Result<()> {
@@ -307,7 +222,7 @@ impl SyncEngine {
             &DataSourceType::Mysql,
             config.sync_config.batch_size
         );
-        implementations::es_to_mysql::sync_es_to_mysql(self, config).await
+        es_to_mysql_impl::sync_es_to_mysql_impl(self, config).await
     }
 
     async fn sync_mysql_to_mysql(&self, mut config: SyncTaskConfig) -> Result<()> {
@@ -315,7 +230,7 @@ impl SyncEngine {
             &DataSourceType::Mysql,
             config.sync_config.batch_size
         );
-        implementations::mysql_to_mysql::sync_mysql_to_mysql(self, config).await
+        mysql_to_mysql_impl::sync_mysql_to_mysql_impl(self, config).await
     }
 
     async fn sync_es_to_es(&self, mut config: SyncTaskConfig) -> Result<()> {
@@ -323,8 +238,34 @@ impl SyncEngine {
             &DataSourceType::Elasticsearch,
             config.sync_config.batch_size
         );
-        implementations::es_to_es::sync_es_to_es(self, config).await
+        es_to_es_impl::sync_es_to_es_impl(self, config).await
     }
+}
+
+    async fn sync_es_to_mysql(&self, mut config: SyncTaskConfig) -> Result<()> {
+        config.sync_config.batch_size = self.get_adaptive_batch_size(
+            &DataSourceType::Mysql,
+            config.sync_config.batch_size
+        );
+        self.sync_es_to_mysql_impl(config).await
+    }
+
+    async fn sync_mysql_to_mysql(&self, mut config: SyncTaskConfig) -> Result<()> {
+        config.sync_config.batch_size = self.get_adaptive_batch_size(
+            &DataSourceType::Mysql,
+            config.sync_config.batch_size
+        );
+        self.sync_mysql_to_mysql_impl(config).await
+    }
+
+    async fn sync_es_to_es(&self, mut config: SyncTaskConfig) -> Result<()> {
+        config.sync_config.batch_size = self.get_adaptive_batch_size(
+            &DataSourceType::Elasticsearch,
+            config.sync_config.batch_size
+        );
+        self.sync_es_to_es_impl(config).await
+    }
+
     /// 根据源表结构创建目标表结构（使用类型映射）
     pub(super) fn convert_schema(
         &self,
@@ -417,5 +358,27 @@ impl SyncEngine {
                 }
             }
         }
+    }
+
+    // ==================== 同步类型实现方法 ====================
+
+    /// MySQL → ES 同步实现
+    async fn sync_mysql_to_es_impl(&self, config: SyncTaskConfig) -> Result<()> {
+        mysql_to_es_impl::sync_mysql_to_es_impl(self, config).await
+    }
+
+    /// ES → MySQL 同步实现
+    async fn sync_es_to_mysql_impl(&self, config: SyncTaskConfig) -> Result<()> {
+        es_to_mysql_impl::sync_es_to_mysql_impl(self, config).await
+    }
+
+    /// MySQL → MySQL 同步实现
+    async fn sync_mysql_to_mysql_impl(&self, config: SyncTaskConfig) -> Result<()> {
+        mysql_to_mysql_impl::sync_mysql_to_mysql_impl(self, config).await
+    }
+
+    /// ES → ES 同步实现
+    async fn sync_es_to_es_impl(&self, config: SyncTaskConfig) -> Result<()> {
+        es_to_es_impl::sync_es_to_es_impl(self, config).await
     }
 }

@@ -33,6 +33,7 @@
       :is-edit="isEdit"
       :form-data="formData"
       @submit="handleSubmit"
+      @create="handleCreate"
     />
 
     <!-- 删除确认对话框 -->
@@ -139,7 +140,7 @@ const columns: DataTableColumns<SyncTask> = [
   {
     title: '操作',
     key: 'actions',
-    width: 150,
+    width: 180,
     render: (row) => h(
       NSpace,
       {},
@@ -147,8 +148,13 @@ const columns: DataTableColumns<SyncTask> = [
         default: () => [
           h(
             NButton,
-            { size: 'small', onClick: () => handleEdit(row) },
-            { default: () => '编辑', icon: () => h(NIcon, null, { default: () => h(EditIcon) }) }
+            { size: 'small', onClick: () => handleEditName(row) },
+            { default: () => '修改名称', icon: () => h(NIcon, null, { default: () => h(EditIcon) }) }
+          ),
+          h(
+            NButton,
+            { size: 'small', type: 'primary', onClick: () => handleConfigure(row) },
+            { default: () => '配置任务', icon: () => h(NIcon, null, { default: () => h(EditIcon) }) }
           ),
           h(
             NButton,
@@ -175,7 +181,7 @@ const formData = ref<Partial<SyncTask> & { targetDatabase?: string }>({
   esConfig: { indices: [] },
   syncConfig: {
     threadCount: 4,
-    batchSize: 1000,
+    batchSize: 2500,
     errorStrategy: 'skip',
     tableExistsStrategy: 'drop',
     dbNameTransform: {
@@ -206,7 +212,7 @@ function handleAdd() {
     esConfig: { indices: [] },
     syncConfig: {
       threadCount: 4,
-      batchSize: 1000,
+      batchSize: 2500,
       errorStrategy: 'skip',
       tableExistsStrategy: 'drop',
       dbNameTransform: {
@@ -221,41 +227,96 @@ function handleAdd() {
   showModal.value = true
 }
 
-function handleEdit(row: SyncTask) {
+// 修改任务名称（只修改名称，不进入配置步骤）
+async function handleEditName(row: SyncTask) {
+  const newName = prompt('请输入新的任务名称：', row.name)
+  if (newName && newName.trim() && newName !== row.name) {
+    try {
+      await syncTaskStore.updateTask(row.id, { ...row, name: newName.trim() })
+      showSuccess('任务名称修改成功')
+      await loadTasks()
+    } catch (error) {
+      handleApiError(error, '修改任务名称失败')
+    }
+  }
+}
+
+// 配置任务（进入完整配置步骤）
+function handleConfigure(row: SyncTask) {
   isEdit.value = true
   formData.value = { ...row }
   showModal.value = true
 }
 
+async function handleCreate(data: { name: string; sourceType: any; targetType: any }) {
+  try {
+    // 前置配置完成，创建任务记录（只保存名称和类型）
+    await syncTaskStore.createTask({
+      name: data.name,
+      sourceId: '', // 暂时为空，后续步骤中填写
+      targetId: '', // 暂时为空，后续步骤中填写
+      sourceType: data.sourceType,
+      targetType: data.targetType,
+      mysqlConfig: { databases: [] },
+      esConfig: { indices: [] },
+      syncConfig: {
+        threadCount: 4,
+        batchSize: 2500,
+        errorStrategy: 'skip',
+        tableExistsStrategy: 'drop'
+      },
+      status: 'idle'
+    })
+    
+    showSuccess('任务创建成功，请在列表中点击"编辑"按钮进行配置')
+    
+    // 关闭对话框
+    showModal.value = false
+    
+    // 刷新任务列表
+    await loadTasks()
+  } catch (error) {
+    handleApiError(error, '创建任务失败')
+  }
+}
+
 async function handleSubmit(data: Partial<SyncTask>) {
   try {
+    console.log('SyncTaskConfig.handleSubmit - 收到提交数据:', data)
+    
     let taskId: string
     
-    if (isEdit.value && data.id) {
+    if (data.id) {
+      // 更新现有任务配置
+      console.log('SyncTaskConfig.handleSubmit - 更新任务:', data.id)
       await syncTaskStore.updateTask(data.id, data as SyncTask)
       taskId = data.id
-      showSuccess('任务更新成功')
+      showSuccess('任务配置保存成功，正在跳转到任务监控...')
     } else {
-      // createTask 返回新创建的任务 ID
-      taskId = await syncTaskStore.createTask(data as SyncTask)
+      // 创建新任务（完整配置）
+      console.log('SyncTaskConfig.handleSubmit - 创建新任务')
+      const newTask = {
+        ...data,
+        status: 'idle' as const
+      } as Omit<SyncTask, 'id' | 'createdAt' | 'updatedAt'>
+      
+      taskId = await syncTaskStore.createTask(newTask)
       showSuccess('任务创建成功，正在跳转到任务监控...')
     }
     
     showModal.value = false
     await loadTasks()
     
-    // 如果是新建任务，跳转到任务监控页面
-    if (!isEdit.value) {
-      // 使用 setTimeout 确保提示消息显示后再跳转
-      setTimeout(() => {
-        router.push({
-          path: '/task-monitor',
-          query: { taskId }
-        })
-      }, 500)
-    }
+    // 跳转到任务监控页面
+    setTimeout(() => {
+      router.push({
+        path: '/task-monitor',
+        query: { taskId }
+      })
+    }, 500)
   } catch (error) {
-    handleApiError(error, isEdit.value ? '更新任务失败' : '创建任务失败')
+    console.error('SyncTaskConfig.handleSubmit - 错误:', error)
+    handleApiError(error, '保存任务失败')
   }
 }
 

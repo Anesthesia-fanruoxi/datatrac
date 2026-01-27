@@ -118,8 +118,14 @@ pub struct DatabaseSelection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EsSyncConfig {
-    /// 索引选择
-    pub indices: Vec<IndexSelection>,
+    /// 索引选择（旧方案，保持兼容，ES→MySQL 使用）
+    pub indices: Option<Vec<IndexSelection>>,
+    /// 搜索条件组（新方案，ES→ES 专用）
+    pub search_groups: Option<Vec<ESSearchGroup>>,
+    /// 最终选择的索引（新方案，ES→ES 专用）
+    pub selected_indices: Option<Vec<String>>,
+    /// 索引名称转换配置（新方案，ES→ES 专用）
+    pub index_name_transform: Option<IndexNameTransform>,
 }
 
 /// 索引选择
@@ -130,6 +136,30 @@ pub struct IndexSelection {
     pub pattern: String,
     /// 匹配到的索引列表（通配符展开后）
     pub matched_indices: Option<Vec<String>>,
+}
+
+/// ES 搜索条件组
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ESSearchGroup {
+    /// 搜索条件
+    pub pattern: String,
+    /// 匹配的索引
+    pub matched_indices: Vec<String>,
+}
+
+/// 索引名称转换配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexNameTransform {
+    /// 是否启用
+    pub enabled: bool,
+    /// 转换模式
+    pub mode: TransformMode,
+    /// 源模式（前缀或后缀）
+    pub source_pattern: String,
+    /// 目标模式（前缀或后缀）
+    pub target_pattern: String,
 }
 
 /// 同步任务运行时状态

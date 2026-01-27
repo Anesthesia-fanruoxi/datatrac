@@ -68,44 +68,12 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       // 启动事件监听
       await startEventListeners();
       
-      // 先获取任务配置
-      const task = await invoke<any>('get_task', { id: taskId });
-      if (!task) {
-        throw new Error('任务不存在');
-      }
+      console.log('启动任务:', taskId);
       
-      // 解析配置
-      let config = { mysqlConfig: undefined, esConfig: undefined, syncConfig: {} };
-      try {
-        if (task.config) {
-          config = JSON.parse(task.config);
-        }
-      } catch (e) {
-        console.error('解析任务配置失败:', e);
-        throw new Error('任务配置格式错误');
-      }
+      // 直接传递任务 ID,后端会从数据库加载配置
+      await invoke('start_sync', { taskId });
       
-      // 构建 SyncTaskConfig（使用驼峰命名，后端会自动转换）
-      const syncTaskConfig = {
-        taskId: task.id,
-        taskName: task.name,
-        sourceId: task.sourceId,
-        targetId: task.targetId,
-        syncDirection: getSyncDirection(task.sourceType, task.targetType),
-        mysqlConfig: config.mysqlConfig,
-        esConfig: config.esConfig,
-        syncConfig: config.syncConfig || {
-          threadCount: 4,
-          batchSize: 1000,
-          errorStrategy: 'skip',
-          tableExistsStrategy: 'drop'
-        }
-      };
-      
-      console.log('启动任务配置:', syncTaskConfig);
-      
-      // 调用后端启动任务
-      await invoke('start_sync', { config: syncTaskConfig });
+      console.log('任务启动成功');
     } catch (e) {
       error.value = `启动任务失败: ${e}`;
       console.error('startTask error:', e);
@@ -259,22 +227,6 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
    */
   function clearError(): void {
     error.value = null;
-  }
-
-  /**
-   * 根据源和目标类型确定同步方向
-   */
-  function getSyncDirection(sourceType: string, targetType: string): string {
-    if (sourceType === 'mysql' && targetType === 'elasticsearch') {
-      return 'MysqlToEs';
-    } else if (sourceType === 'elasticsearch' && targetType === 'mysql') {
-      return 'EsToMysql';
-    } else if (sourceType === 'mysql' && targetType === 'mysql') {
-      return 'MysqlToMysql';
-    } else if (sourceType === 'elasticsearch' && targetType === 'elasticsearch') {
-      return 'EsToEs';
-    }
-    throw new Error(`不支持的同步方向: ${sourceType} -> ${targetType}`);
   }
 
   // ==================== 返回 ====================

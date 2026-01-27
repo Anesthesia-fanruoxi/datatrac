@@ -35,7 +35,7 @@
               </n-tag>
             </div>
             <div class="task-card-info">
-              <span class="task-source">{{ task.sourceName }} → {{ task.targetName }}</span>
+              <span class="task-source">{{ getDataSourceName(task.sourceId) }} → {{ getDataSourceName(task.targetId) }}</span>
             </div>
             <n-progress
               v-if="getTaskProgress(task.id)"
@@ -166,7 +166,7 @@
               </n-button>
             </template>
             
-            <div class="table-progress-container" ref="tableProgressRef">
+            <div class="table-progress-container">
               <div
                 v-for="table in progress.tableProgress"
                 :key="table.tableName"
@@ -398,7 +398,6 @@ const allLogContentRef = ref<HTMLElement>()
 const detailLogContentRef = ref<HTMLElement>()
 const verifyLogContentRef = ref<HTMLElement>()
 const errorLogContentRef = ref<HTMLElement>()
-const tableProgressRef = ref<HTMLElement>()
 
 let unlistenLog: UnlistenFn | null = null
 let unlistenError: UnlistenFn | null = null
@@ -446,6 +445,12 @@ function getTaskProgress(taskId: string) {
     return taskMonitorStore.progress
   }
   return null
+}
+
+// 获取数据源名称
+function getDataSourceName(dataSourceId: string): string {
+  const ds = dataSourceStore.dataSources.find(d => d.id === dataSourceId)
+  return ds?.name || '未知数据源'
 }
 
 // 获取状态文本
@@ -546,6 +551,35 @@ function handleTaskSelect(taskId: string) {
 // 启动任务
 async function handleStart() {
   if (!selectedTaskId.value) return
+  
+  const task = getSelectedTask()
+  if (!task) return
+  
+  console.log('handleStart - 检查任务配置:', task)
+  
+  // 验证任务配置
+  if (!task.sourceId || !task.targetId) {
+    handleApiError(new Error('任务未配置数据源，请先完成任务配置'), '启动任务失败')
+    return
+  }
+  
+  // 验证是否配置了同步的表/索引
+  const hasMySQLConfig = task.mysqlConfig?.databases?.length > 0
+  const hasESIndices = task.esConfig?.indices?.length > 0
+  const hasESSelectedIndices = task.esConfig?.selectedIndices?.length > 0
+  
+  console.log('handleStart - 配置检查:', {
+    hasMySQLConfig,
+    hasESIndices,
+    hasESSelectedIndices,
+    mysqlConfig: task.mysqlConfig,
+    esConfig: task.esConfig
+  })
+  
+  if (!hasMySQLConfig && !hasESIndices && !hasESSelectedIndices) {
+    handleApiError(new Error('任务未配置同步的表/索引，请先完成任务配置'), '启动任务失败')
+    return
+  }
   
   try {
     await taskMonitorStore.startTask(selectedTaskId.value)
