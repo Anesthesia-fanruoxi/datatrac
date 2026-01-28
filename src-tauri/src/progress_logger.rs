@@ -12,6 +12,8 @@ pub struct LogEntry {
     pub timestamp: String,
     /// 日志级别
     pub level: LogLevel,
+    /// 日志分类
+    pub category: LogCategory,
     /// 日志消息
     pub message: String,
 }
@@ -23,6 +25,16 @@ pub enum LogLevel {
     Info,
     Warn,
     Error,
+}
+
+/// 日志分类
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogCategory {
+    Realtime,  // 实时日志（所有详细信息）
+    Summary,   // 明细日志（批次摘要）
+    Verify,    // 校验日志（数据校验结果）
+    Error,     // 错误日志（错误信息）
 }
 
 /// 日志事件数据
@@ -63,14 +75,16 @@ impl TaskLogger {
     /// # 参数
     /// - `task_id`: 任务 ID
     /// - `level`: 日志级别
+    /// - `category`: 日志分类
     /// - `message`: 日志消息
-    pub fn add_log(&self, task_id: &str, level: LogLevel, message: String) {
+    pub fn add_log(&self, task_id: &str, level: LogLevel, category: LogCategory, message: String) {
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         
         // 创建日志条目
         let log_entry = LogEntry {
             timestamp: now,
             level,
+            category,
             message,
         };
         
@@ -99,15 +113,9 @@ impl TaskLogger {
                 log: log.clone(),
             };
             
-            log::info!("发送日志事件: task_id={}, message={}", task_id, log.message);
-            
             if let Err(e) = handle.emit("task-log", &event) {
                 log::error!("发送日志事件失败: {}", e);
-            } else {
-                log::info!("日志事件发送成功");
             }
-        } else {
-            log::warn!("app_handle 未设置，无法发送日志事件");
         }
     }
 
@@ -130,7 +138,6 @@ impl TaskLogger {
     pub fn clear_logs(&self, task_id: &str) {
         let mut logs = self.task_logs.write().unwrap();
         logs.remove(task_id);
-        log::info!("已清除任务 {} 的日志", task_id);
     }
 }
 
@@ -148,19 +155,20 @@ mod tests {
     fn test_add_log() {
         let logger = TaskLogger::new();
         
-        logger.add_log("task1", LogLevel::Info, "测试日志".to_string());
+        logger.add_log("task1", LogLevel::Info, LogCategory::Realtime, "测试日志".to_string());
         
         let logs = logger.get_logs("task1");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].message, "测试日志");
         assert_eq!(logs[0].level, LogLevel::Info);
+        assert_eq!(logs[0].category, LogCategory::Realtime);
     }
 
     #[test]
     fn test_clear_logs() {
         let logger = TaskLogger::new();
         
-        logger.add_log("task1", LogLevel::Info, "测试日志".to_string());
+        logger.add_log("task1", LogLevel::Info, LogCategory::Realtime, "测试日志".to_string());
         assert_eq!(logger.get_logs("task1").len(), 1);
         
         logger.clear_logs("task1");
@@ -172,9 +180,9 @@ mod tests {
         let logger = TaskLogger::new();
         
         // 任务1添加日志
-        logger.add_log("task1", LogLevel::Info, "任务1日志".to_string());
+        logger.add_log("task1", LogLevel::Info, LogCategory::Realtime, "任务1日志".to_string());
         // 任务2添加日志
-        logger.add_log("task2", LogLevel::Info, "任务2日志".to_string());
+        logger.add_log("task2", LogLevel::Info, LogCategory::Summary, "任务2日志".to_string());
         
         // 验证任务之间不互相影响
         assert_eq!(logger.get_logs("task1").len(), 1);
@@ -189,7 +197,7 @@ mod tests {
         
         // 添加 1500 条日志
         for i in 0..1500 {
-            logger.add_log("task1", LogLevel::Info, format!("日志 {}", i));
+            logger.add_log("task1", LogLevel::Info, LogCategory::Realtime, format!("日志 {}", i));
         }
         
         // 验证只保留最近 1000 条

@@ -2,7 +2,8 @@
   <n-form label-placement="left" label-width="120">
     <n-form-item label="并发线程数" required>
       <n-input-number
-        v-model:value="localConfig.threadCount"
+        :value="syncConfig.threadCount"
+        @update:value="updateThreadCount"
         :min="1"
         :max="32"
         style="width: 100%"
@@ -21,7 +22,8 @@
 
     <n-form-item label="批量大小" required>
       <n-input-number
-        v-model:value="localConfig.batchSize"
+        :value="syncConfig.batchSize"
+        @update:value="updateBatchSize"
         :min="100"
         :max="10000"
         :step="100"
@@ -40,7 +42,7 @@
     </n-form-item>
 
     <n-form-item label="错误处理策略" required>
-      <n-radio-group v-model:value="localConfig.errorStrategy">
+      <n-radio-group :value="syncConfig.errorStrategy" @update:value="updateErrorStrategy">
         <n-space>
           <n-radio value="skip">跳过错误继续</n-radio>
           <n-radio value="pause">遇错暂停</n-radio>
@@ -49,7 +51,7 @@
     </n-form-item>
 
     <n-form-item label="目标表存在时" required>
-      <n-radio-group v-model:value="localConfig.tableExistsStrategy">
+      <n-radio-group :value="syncConfig.tableExistsStrategy" @update:value="updateTableExistsStrategy">
         <n-space vertical>
           <n-radio value="drop">删除重建</n-radio>
           <n-radio value="truncate">清空数据</n-radio>
@@ -61,7 +63,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { NForm, NFormItem, NInputNumber, NRadioGroup, NRadio, NSpace, NText } from 'naive-ui'
 import type { SyncConfig } from '../../../types'
 
@@ -73,20 +74,35 @@ const emit = defineEmits<{
   'update:syncConfig': [value: SyncConfig]
 }>()
 
-const localConfig = computed({
-  get: () => ({
-    threadCount: props.syncConfig.threadCount,
-    batchSize: props.syncConfig.batchSize,
-    errorStrategy: props.syncConfig.errorStrategy,
-    tableExistsStrategy: props.syncConfig.tableExistsStrategy
-  }),
-  set: (val) => {
+const updateThreadCount = (value: number | null) => {
+  if (value !== null) {
     emit('update:syncConfig', {
-      threadCount: val.threadCount,
-      batchSize: val.batchSize,
-      errorStrategy: val.errorStrategy,
-      tableExistsStrategy: val.tableExistsStrategy
+      ...props.syncConfig,
+      threadCount: value
     })
   }
-})
+}
+
+const updateBatchSize = (value: number | null) => {
+  if (value !== null) {
+    emit('update:syncConfig', {
+      ...props.syncConfig,
+      batchSize: value
+    })
+  }
+}
+
+const updateErrorStrategy = (value: string) => {
+  emit('update:syncConfig', {
+    ...props.syncConfig,
+    errorStrategy: value as 'skip' | 'pause'
+  })
+}
+
+const updateTableExistsStrategy = (value: string) => {
+  emit('update:syncConfig', {
+    ...props.syncConfig,
+    tableExistsStrategy: value as 'drop' | 'truncate' | 'backup'
+  })
+}
 </script>

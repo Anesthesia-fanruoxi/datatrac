@@ -7,9 +7,11 @@ use tauri::{AppHandle, Emitter};
 
 // 导入日志模块
 use crate::progress_logger::TaskLogger;
+// 导入任务管理器类型
+use crate::task_manager::TaskUnit;
 
 // 重新导出日志类型，保持向后兼容
-pub use crate::progress_logger::{LogEntry, LogLevel};
+pub use crate::progress_logger::{LogEntry, LogLevel, LogCategory};
 
 /// 任务进度信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,8 @@ pub struct TaskProgress {
     pub current_table: Option<String>,
     /// 表级别进度列表
     pub table_progress: Vec<TableProgress>,
+    /// 任务单元列表 (新增)
+    pub task_units: Vec<TaskUnit>,
 }
 
 /// 表级别进度信息
@@ -125,6 +129,7 @@ impl ProgressMonitor {
             start_time,
             current_table: None,
             table_progress: Vec::new(),
+            task_units: Vec::new(),
         };
 
         {
@@ -413,9 +418,10 @@ impl ProgressMonitor {
     /// # 参数
     /// - `task_id`: 任务 ID
     /// - `level`: 日志级别
+    /// - `category`: 日志分类
     /// - `message`: 日志消息
-    pub fn add_log(&self, task_id: &str, level: LogLevel, message: String) {
-        self.logger.add_log(task_id, level, message);
+    pub fn add_log(&self, task_id: &str, level: LogLevel, category: LogCategory, message: String) {
+        self.logger.add_log(task_id, level, category, message);
     }
 
     /// 获取任务日志
@@ -435,6 +441,37 @@ impl ProgressMonitor {
     /// - `task_id`: 任务 ID
     pub fn clear_logs(&self, task_id: &str) {
         self.logger.clear_logs(task_id);
+    }
+
+    /// 更新任务单元列表
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `task_units`: 任务单元列表
+    pub fn update_task_units(&self, task_id: &str, task_units: Vec<TaskUnit>) {
+        let mut map = self.current_progress.write().unwrap();
+        
+        if let Some(progress) = map.get_mut(task_id) {
+            progress.task_units = task_units;
+            
+            let progress_clone = progress.clone();
+            drop(map);
+            self.emit_progress_sync(&progress_clone);
+        }
+    }
+
+    /// 获取任务单元列表
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// 
+    /// # 返回
+    /// 任务单元列表
+    pub fn get_task_units(&self, task_id: &str) -> Vec<TaskUnit> {
+        let map = self.current_progress.read().unwrap();
+        map.get(task_id)
+            .map(|p| p.task_units.clone())
+            .unwrap_or_default()
     }
 }
 

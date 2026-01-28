@@ -1,5 +1,5 @@
 <template>
-  <n-layout has-sider style="height: 100vh">
+  <n-layout has-sider style="height: 100vh;">
     <n-layout-sider
       bordered
       collapse-mode="width"
@@ -25,11 +25,7 @@
         <h2 style="margin: 0">{{ currentTitle }}</h2>
       </n-layout-header>
       
-      <n-layout-content
-        content-style="padding: 24px;"
-        :native-scrollbar="false"
-        style="height: calc(100vh - 64px)"
-      >
+      <n-layout-content style="height: calc(100vh - 64px);">
         <router-view />
       </n-layout-content>
     </n-layout>

@@ -357,5 +357,7 @@ onMounted(async () => {
 <style scoped>
 .sync-task-config {
   height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
 }
 </style>

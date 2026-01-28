@@ -15,9 +15,11 @@ use crate::error_logger::ErrorLogger;
 use crate::progress::ProgressMonitor;
 use crate::storage::DataSourceType;
 use crate::type_mapper::TypeMapper;
+use crate::task_manager::TaskManager;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use tokio::sync::Semaphore;
 
 /// 同步引擎
 /// 
@@ -33,6 +35,8 @@ pub struct SyncEngine {
     progress_monitor: Arc<ProgressMonitor>,
     /// 错误日志器
     error_logger: Arc<ErrorLogger>,
+    /// 任务管理器
+    task_manager: Arc<TaskManager>,
     /// 任务状态映射 (task_id -> SyncTaskState)
     task_states: Arc<RwLock<HashMap<String, SyncTaskState>>>,
 }
@@ -48,8 +52,14 @@ impl SyncEngine {
             source_manager,
             progress_monitor,
             error_logger,
+            task_manager: Arc::new(TaskManager::new()),
             task_states: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 获取任务管理器的引用
+    pub fn task_manager(&self) -> &Arc<TaskManager> {
+        &self.task_manager
     }
 
     /// 获取任务状态
@@ -417,5 +427,74 @@ impl SyncEngine {
                 }
             }
         }
+    }
+
+    /// 通用的并发批处理方法
+    /// 
+    /// # 参数
+    /// - `task_id`: 任务 ID
+    /// - `thread_count`: 并发线程数
+    /// - `batches`: 批次数据的迭代器
+    /// - `process_fn`: 处理单个批次的异步函数
+    /// 
+    /// # 返回
+    /// 处理成功的批次数量
+    pub async fn concurrent_batch_process<T, F, Fut>(
+        &self,
+        task_id: &str,
+        thread_count: usize,
+        batches: Vec<T>,
+        process_fn: F,
+    ) -> Result<usize>
+    where
+        T: Send + 'static,
+        F: Fn(T) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send,
+    {
+        let semaphore = Arc::new(Semaphore::new(thread_count));
+        let process_fn = Arc::new(process_fn);
+        let mut tasks = Vec::new();
+        let total_batches = batches.len();
+        let success_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        log::info!("开始并发处理 {} 个批次，并发数: {}", total_batches, thread_count);
+
+        for batch in batches {
+            let permit = semaphore.clone().acquire_owned().await?;
+            let process_fn = process_fn.clone();
+            let success_count = success_count.clone();
+            let task_id = task_id.to_string();
+
+            let task = tokio::spawn(async move {
+                let result = process_fn(batch).await;
+                
+                if result.is_ok() {
+                    success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                
+                drop(permit);
+                result
+            });
+
+            tasks.push(task);
+        }
+
+        // 等待所有任务完成
+        let mut errors = Vec::new();
+        for task in tasks {
+            if let Err(e) = task.await {
+                errors.push(format!("任务执行失败: {}", e));
+            }
+        }
+
+        let success = success_count.load(std::sync::atomic::Ordering::SeqCst);
+        
+        if !errors.is_empty() {
+            log::warn!("部分批次处理失败: {}/{}", errors.len(), total_batches);
+        }
+
+        log::info!("并发处理完成: 成功 {}/{}", success, total_batches);
+        
+        Ok(success)
     }
 }

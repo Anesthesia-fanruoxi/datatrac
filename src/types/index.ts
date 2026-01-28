@@ -228,6 +228,24 @@ export interface LogEntry {
 }
 
 /**
+ * 任务单元状态
+ */
+export type TaskUnitStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/**
+ * 任务单元（表/索引）
+ */
+export interface TaskUnit {
+  id: string;
+  name: string;
+  status: TaskUnitStatus;
+  percentage: number;
+  processedRecords: number;
+  totalRecords: number;
+  errorMessage?: string;
+}
+
+/**
  * 任务进度
  */
 export interface TaskProgress {
@@ -241,6 +259,7 @@ export interface TaskProgress {
   startTime: string;
   currentTable?: string; // 当前处理的表/索引
   tableProgress?: TableProgress[]; // 表进度列表
+  taskUnits?: TaskUnit[]; // 任务单元列表（新）
 }
 
 /**

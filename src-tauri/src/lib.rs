@@ -7,6 +7,7 @@ mod progress;
 mod progress_logger;
 pub mod error_logger;
 pub mod sync_engine;
+mod task_manager;
 mod commands;
 
 use commands::AppState;
