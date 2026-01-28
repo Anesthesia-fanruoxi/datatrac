@@ -9,7 +9,7 @@
       <n-card
         v-for="type in dataSourceTypes"
         :key="type.value"
-        :class="['type-card', { selected: modelValue === type.value }]"
+        :class="['type-card', { selected: selectedType === type.value }]"
         hoverable
         @click="selectType(type.value)"
       >

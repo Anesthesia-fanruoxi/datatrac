@@ -310,7 +310,7 @@ async function handleSubmit(data: Partial<SyncTask>) {
     // 跳转到任务监控页面
     setTimeout(() => {
       router.push({
-        path: '/task-monitor',
+        path: '/monitor',
         query: { taskId }
       })
     }, 500)

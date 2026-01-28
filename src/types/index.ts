@@ -12,7 +12,7 @@ export type DataSourceType = 'mysql' | 'elasticsearch';
 /**
  * 任务类型（数据源组合）
  */
-export type SyncTaskType = 'mysql-mysql' | 'mysql-es' | 'es-mysql' | 'es-es';
+export type SyncTaskType = 'mysql-mysql' | 'mysql-es' | 'es-mysql' | 'es-es' | 'mysql-elasticsearch' | 'elasticsearch-mysql' | 'elasticsearch-elasticsearch';
 
 /**
  * 数据源接口
@@ -105,6 +105,7 @@ export interface IndexSelection {
 export interface ESSearchGroup {
   pattern: string;           // 搜索条件
   matchedIndices: string[];  // 匹配的索引
+  loading?: boolean;         // 加载状态
 }
 
 /**

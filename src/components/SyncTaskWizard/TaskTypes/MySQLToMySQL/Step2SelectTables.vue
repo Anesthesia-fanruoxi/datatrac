@@ -174,9 +174,9 @@ const filteredTreeData = computed<TreeOption[]>(() => {
   const pattern = searchPattern.value.toLowerCase()
   return treeData.value
     .map(db => {
-      const dbMatches = db.label.toString().toLowerCase().includes(pattern)
+      const dbMatches = db.label?.toString().toLowerCase().includes(pattern) || false
       const filteredChildren = db.children?.filter(table => 
-        table.label.toString().toLowerCase().includes(pattern)
+        table.label?.toString().toLowerCase().includes(pattern)
       ) || []
       
       if (dbMatches || filteredChildren.length > 0) {

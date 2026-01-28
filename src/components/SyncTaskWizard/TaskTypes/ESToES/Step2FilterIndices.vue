@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { NSpace, NAlert, NInput, NButton, NCard, NText, NScrollbar, NTag } from 'naive-ui'
 import { useSyncTaskStore } from '../../../../stores/syncTask'
 import { handleApiError } from '../../../../utils/message'

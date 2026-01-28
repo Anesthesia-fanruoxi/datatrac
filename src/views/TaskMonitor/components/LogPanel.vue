@@ -9,7 +9,7 @@
             <n-badge v-if="allLogs.length > 0" :value="allLogs.length" :max="9999" style="margin-left: 8px" />
           </template>
           <div class="log-container">
-            <div :ref="el => allLogRef = el" class="log-content">
+            <div :ref="(el) => allLogRef = el as HTMLElement | null" class="log-content">
               <div v-for="(log, index) in allLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -27,7 +27,7 @@
             <n-badge v-if="detailLogs.length > 0" :value="detailLogs.length" :max="9999" style="margin-left: 8px" />
           </template>
           <div class="log-container">
-            <div :ref="el => detailLogRef = el" class="log-content">
+            <div :ref="(el) => detailLogRef = el as HTMLElement | null" class="log-content">
               <div v-for="(log, index) in detailLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -45,7 +45,7 @@
             <n-badge v-if="verifyLogs.length > 0" :value="verifyLogs.length" :max="9999" style="margin-left: 8px" />
           </template>
           <div class="log-container">
-            <div :ref="el => verifyLogRef = el" class="log-content">
+            <div :ref="(el) => verifyLogRef = el as HTMLElement | null" class="log-content">
               <div v-for="(log, index) in verifyLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -63,7 +63,7 @@
             <n-badge v-if="errors.length > 0" :value="errors.length" :max="99" type="error" style="margin-left: 8px" />
           </template>
           <div class="log-container">
-            <div :ref="el => errorLogRef = el" class="log-content">
+            <div :ref="(el) => errorLogRef = el as HTMLElement | null" class="log-content">
               <div v-for="(error, index) in errors" :key="index" class="error-item">
                 <div class="error-item-header">
                   <span class="error-time">{{ new Date(error.timestamp).toLocaleString() }}</span>
@@ -99,7 +99,7 @@ interface Log {
 }
 
 interface Error {
-  timestamp: number
+  timestamp: number | string
   errorType: string
   message: string
   data?: any

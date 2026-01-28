@@ -11,7 +11,7 @@
     <!-- 前置配置：任务名称和数据源类型（不算步骤） -->
     <template v-if="!taskType">
       <Step1SelectDataSourceType
-        v-model:task-name="formData.name"
+        v-model:task-name="taskName"
         v-model:source-type="sourceTypeSelected"
         v-model:target-type="targetTypeSelected"
         :is-edit="isEdit"
@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, shallowRef } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { NModal, NSteps, NStep, NSpace, NButton } from 'naive-ui'
 import TaskHeader from './TaskHeader.vue'
 import Step1SelectDataSourceType from './Step1SelectDataSourceType.vue'
@@ -138,6 +138,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
+  'update:formData': [data: Partial<SyncTask>]
   'submit': [data: Partial<SyncTask>]
   'create': [data: { name: string; sourceType: DataSourceType; targetType: DataSourceType }]
 }>()
@@ -156,8 +157,9 @@ const modalTitle = computed(() => {
 })
 
 const taskType = ref<SyncTaskType | ''>('')
-const sourceTypeSelected = ref<DataSourceType | ''>('')
-const targetTypeSelected = ref<DataSourceType | ''>('')
+const sourceTypeSelected = ref<DataSourceType | undefined>(undefined)
+const targetTypeSelected = ref<DataSourceType | undefined>(undefined)
+const taskName = ref<string>(props.formData.name || '')
 const currentStep = ref(1)
 
 // 不再自动设置 taskType，只在编辑模式时设置
@@ -357,7 +359,7 @@ const maxSteps = computed(() => {
 
 // 前置配置是否可以开始
 const canStartConfig = computed(() => {
-  return !!(props.formData.name && props.formData.name.trim() && sourceTypeSelected.value && targetTypeSelected.value)
+  return !!(taskName.value && taskName.value.trim() && sourceTypeSelected.value && targetTypeSelected.value)
 })
 
 const canGoNext = computed(() => {
@@ -388,23 +390,29 @@ const canGoNext = computed(() => {
 })
 
 function handleTaskNameUpdate(newName: string) {
-  formData.value.name = newName
+  taskName.value = newName
+  emit('update:formData', { ...props.formData, name: newName })
   // 如果任务已创建（有 id），立即保存名称修改
-  if (formData.value.id) {
-    // 这里可以调用 API 更新任务名称，但为了简化，我们在最终提交时一起保存
+  if (props.formData.id) {
+    // 这里可以调用 API 更新任务名称,但为了简化,我们在最终提交时一起保存
     // 或者可以添加一个 debounce 的自动保存功能
   }
 }
 
 function handleStartConfig() {
-  // 前置配置完成，创建任务记录（只保存名称和类型）
-  // 调用后端API创建任务，然后关闭对话框
-  emit('create', {
-    name: props.formData.name,
-    sourceType: sourceTypeSelected.value,  // 直接使用选择的值
-    targetType: targetTypeSelected.value   // 直接使用选择的值
-  })
-  // 不进入步骤1，而是关闭对话框
+  // 前置配置完成,创建任务记录（只保存名称和类型）
+  // 调用后端API创建任务,然后关闭对话框
+  const sourceType = sourceTypeSelected.value
+  const targetType = targetTypeSelected.value
+  
+  if (sourceType && targetType) {
+    emit('create', {
+      name: taskName.value || '',
+      sourceType: sourceType,
+      targetType: targetType
+    })
+  }
+  // 不进入步骤1,而是关闭对话框
   // 用户需要在任务列表中点击"编辑"按钮才能进入配置步骤
 }
 
@@ -467,8 +475,8 @@ watch(() => props.modelValue, (newValue) => {
   } else if (newValue && !props.isEdit) {
     // 新建模式：重置到前置配置
     taskType.value = ''
-    sourceTypeSelected.value = ''
-    targetTypeSelected.value = ''
+    sourceTypeSelected.value = undefined
+    targetTypeSelected.value = undefined
     currentStep.value = 1
     
     // 重置所有状态变量
@@ -595,8 +603,8 @@ function handleCancel() {
   visible.value = false
   // 重置状态
   taskType.value = ''
-  sourceTypeSelected.value = ''
-  targetTypeSelected.value = ''
+  sourceTypeSelected.value = undefined
+  targetTypeSelected.value = undefined
   currentStep.value = 1
 }
 

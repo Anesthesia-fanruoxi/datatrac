@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { NSpace, NFormItem, NInput, NButton, NIcon, NAlert } from 'naive-ui'
 import { Server as ServerIcon, Cloud as CloudIcon, ArrowForward as ArrowForwardIcon, CheckmarkCircle as CheckmarkCircleIcon } from '@vicons/ionicons5'
 import DataSourceTypeSelector from './DataSourceTypeSelector.vue'

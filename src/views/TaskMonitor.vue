@@ -21,8 +21,8 @@
       <div v-else class="task-detail-content">
         <!-- 任务控制区 -->
         <TaskControl
-          :source-data-source="getSelectedSourceDataSource()"
-          :target-data-source="getSelectedTargetDataSource()"
+          :source-data-source="getSelectedSourceDataSource() || null"
+          :target-data-source="getSelectedTargetDataSource() || null"
           :is-running="isRunning"
           :is-paused="isPaused"
           :loading="taskMonitorStore.loading"
@@ -46,10 +46,10 @@
             :detail-logs="detailLogs"
             :verify-logs="verifyLogs"
             :errors="taskMonitorStore.errors"
-            @update:all-log-ref="allLogContentRef = $event"
-            @update:detail-log-ref="detailLogContentRef = $event"
-            @update:verify-log-ref="verifyLogContentRef = $event"
-            @update:error-log-ref="errorLogContentRef = $event"
+            @update:all-log-ref="(ref) => allLogContentRef = ref || undefined"
+            @update:detail-log-ref="(ref) => detailLogContentRef = ref || undefined"
+            @update:verify-log-ref="(ref) => verifyLogContentRef = ref || undefined"
+            @update:error-log-ref="(ref) => errorLogContentRef = ref || undefined"
           />
         </div>
       </div>
