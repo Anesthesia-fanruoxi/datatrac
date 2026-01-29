@@ -179,22 +179,29 @@ function getPatternColor(pattern: string): string {
 
 const groupedUnits = computed<UnitGroup[]>(() => {
   const newUnits: TaskUnit[] = []
-  const historicalGroups = new Map<string, TaskUnit[]>()
+  const completedUnits: TaskUnit[] = []
   
-  // 分类：新增 vs 已完成
+  // 分类：新增同步 vs 已完成同步
   for (const unit of props.taskUnits) {
-    if (unit.isNew) {
-      // 新增同步（配置表 + 运行记录表）
-      newUnits.push(unit)
+    if (unit.status === 'completed') {
+      // 已完成同步
+      completedUnits.push(unit)
     } else {
-      // 已完成同步（历史记录表）- 按 searchPattern 分组
-      const pattern = unit.searchPattern || '未分类'
-      if (!historicalGroups.has(pattern)) {
-        historicalGroups.set(pattern, [])
-      }
-      historicalGroups.get(pattern)!.push(unit)
+      // 新增同步（待同步、进行中、失败、暂停）
+      newUnits.push(unit)
     }
   }
+  
+  // 新增同步排序：进行中 → 待同步/暂停 → 失败
+  newUnits.sort((a, b) => {
+    const priority: Record<string, number> = {
+      running: 1,
+      pending: 2,
+      paused: 2,
+      failed: 3
+    }
+    return (priority[a.status] || 99) - (priority[b.status] || 99)
+  })
   
   const result: UnitGroup[] = []
   
@@ -208,11 +215,11 @@ const groupedUnits = computed<UnitGroup[]>(() => {
     })
   }
   
-  // 2. 已完成同步组 - 按 pattern 分组，放在后面，默认折叠
-  for (const [pattern, units] of historicalGroups.entries()) {
+  // 2. 已完成同步组（如果有）
+  if (completedUnits.length > 0) {
     result.push({
-      pattern: pattern === '未分类' ? null : pattern,
-      units,
+      pattern: null,
+      units: completedUnits,
       isHistorical: true,
       isNewGroup: false
     })
@@ -226,11 +233,9 @@ function getGroupTitle(group: UnitGroup): string {
     return '🆕 新增同步'
   }
   if (group.isHistorical) {
-    const pattern = group.pattern || '未分类'
-    return `✅ ${pattern} (已完成)`
+    return '✅ 已完成同步'
   }
-  const pattern = group.pattern || '未分类'
-  return `📊 ${pattern}`
+  return '📊 未分类'
 }
 
 // 清除指定关键字的记录

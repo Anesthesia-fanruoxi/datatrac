@@ -226,6 +226,7 @@ function formatCount(count: number): string {
 
 .log-tabs :deep(.n-tabs-nav) {
   flex-shrink: 0;
+  padding-left: 20px;
 }
 
 .log-tabs :deep(.n-tabs-content) {
