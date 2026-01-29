@@ -35,7 +35,9 @@
     "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "^2.43.2",
     "pinia": "^3.0.4",
+    "vfonts": "^0.0.3",
     "vue": "^3.5.27",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "vuedraggable": "^4.1.0"
   }
 }

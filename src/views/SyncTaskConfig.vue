@@ -282,19 +282,15 @@ async function handleCreate(data: { name: string; sourceType: any; targetType: a
 
 async function handleSubmit(data: Partial<SyncTask>) {
   try {
-    console.log('SyncTaskConfig.handleSubmit - 收到提交数据:', data)
-    
     let taskId: string
     
     if (data.id) {
       // 更新现有任务配置
-      console.log('SyncTaskConfig.handleSubmit - 更新任务:', data.id)
       await syncTaskStore.updateTask(data.id, data as SyncTask)
       taskId = data.id
       showSuccess('任务配置保存成功，正在跳转到任务监控...')
     } else {
       // 创建新任务（完整配置）
-      console.log('SyncTaskConfig.handleSubmit - 创建新任务')
       const newTask = {
         ...data,
         status: 'idle' as const
@@ -342,7 +338,6 @@ async function confirmDelete() {
 async function loadTasks() {
   try {
     await syncTaskStore.fetchTasks()
-    console.log('任务列表加载完成:', syncTaskStore.tasks)
   } catch (error) {
     handleApiError(error, '加载任务列表失败')
   }

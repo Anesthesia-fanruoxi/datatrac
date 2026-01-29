@@ -74,7 +74,12 @@ const menuOptions: MenuOption[] = [
 ]
 
 function handleMenuSelect(key: string) {
-  router.push({ name: key })
+  router.push({ name: key }).catch(err => {
+    // 忽略路由重复导航错误
+    if (err.name !== 'NavigationDuplicated') {
+      console.error('路由跳转失败:', err)
+    }
+  })
 }
 </script>
 

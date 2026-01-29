@@ -104,7 +104,8 @@ export interface IndexSelection {
  */
 export interface ESSearchGroup {
   pattern: string;           // 搜索条件
-  matchedIndices: string[];  // 匹配的索引
+  matchedIndices: string[];  // 匹配的索引（所有过滤出来的）
+  selectedIndices?: string[]; // 用户选中的索引（用于编辑时恢复状态）
   loading?: boolean;         // 加载状态
 }
 
@@ -231,7 +232,12 @@ export interface LogEntry {
 /**
  * 任务单元状态
  */
-export type TaskUnitStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TaskUnitStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused';
+
+/**
+ * 任务单元类型
+ */
+export type TaskUnitType = 'table' | 'index';
 
 /**
  * 任务单元（表/索引）
@@ -244,6 +250,19 @@ export interface TaskUnit {
   processedRecords: number;
   totalRecords: number;
   errorMessage?: string;
+  searchPattern?: string; // 搜索关键字（用于按关键字清除记录）
+}
+
+/**
+ * 任务单元状态统计
+ */
+export interface TaskUnitStatistics {
+  total: number;
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+  paused: number;
 }
 
 /**
@@ -261,6 +280,7 @@ export interface TaskProgress {
   currentTable?: string; // 当前处理的表/索引
   tableProgress?: TableProgress[]; // 表进度列表
   taskUnits?: TaskUnit[]; // 任务单元列表（新）
+  statistics?: TaskUnitStatistics; // 状态统计（新）
 }
 
 /**

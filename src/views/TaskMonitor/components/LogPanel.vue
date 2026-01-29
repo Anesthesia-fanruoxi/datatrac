@@ -5,11 +5,14 @@
         <!-- 实时日志 -->
         <n-tab-pane name="logs" class="log-pane">
           <template #tab>
-            实时日志
-            <n-badge v-if="allLogs.length > 0" :value="allLogs.length" :max="9999" style="margin-left: 8px" />
+            <div class="tab-label">
+              <n-icon :size="16"><ListIcon /></n-icon>
+              <span>实时日志</span>
+              <span v-if="allLogs.length > 0" class="tab-badge">{{ formatCount(allLogs.length) }}</span>
+            </div>
           </template>
           <div class="log-container">
-            <div :ref="(el) => allLogRef = el as HTMLElement | null" class="log-content">
+            <div ref="allLogRef" class="log-content">
               <div v-for="(log, index) in allLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -23,11 +26,14 @@
         <!-- 明细日志 -->
         <n-tab-pane name="detail" class="log-pane">
           <template #tab>
-            明细日志
-            <n-badge v-if="detailLogs.length > 0" :value="detailLogs.length" :max="9999" style="margin-left: 8px" />
+            <div class="tab-label">
+              <n-icon :size="16"><DocumentTextIcon /></n-icon>
+              <span>明细日志</span>
+              <span v-if="detailLogs.length > 0" class="tab-badge detail">{{ formatCount(detailLogs.length) }}</span>
+            </div>
           </template>
           <div class="log-container">
-            <div :ref="(el) => detailLogRef = el as HTMLElement | null" class="log-content">
+            <div ref="detailLogRef" class="log-content">
               <div v-for="(log, index) in detailLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -41,11 +47,14 @@
         <!-- 校验日志 -->
         <n-tab-pane name="verify" class="log-pane">
           <template #tab>
-            校验日志
-            <n-badge v-if="verifyLogs.length > 0" :value="verifyLogs.length" :max="9999" style="margin-left: 8px" />
+            <div class="tab-label">
+              <n-icon :size="16"><CheckmarkCircleIcon /></n-icon>
+              <span>校验日志</span>
+              <span v-if="verifyLogs.length > 0" class="tab-badge verify">{{ formatCount(verifyLogs.length) }}</span>
+            </div>
           </template>
           <div class="log-container">
-            <div :ref="(el) => verifyLogRef = el as HTMLElement | null" class="log-content">
+            <div ref="verifyLogRef" class="log-content">
               <div v-for="(log, index) in verifyLogs" :key="index" :class="['log-line', `log-${log.level}`]">
                 <span class="log-time">{{ log.timestamp }}</span>
                 <span class="log-level">{{ getLevelText(log.level) }}</span>
@@ -59,11 +68,14 @@
         <!-- 错误日志 -->
         <n-tab-pane name="errors" class="log-pane">
           <template #tab>
-            错误日志
-            <n-badge v-if="errors.length > 0" :value="errors.length" :max="99" type="error" style="margin-left: 8px" />
+            <div :class="['tab-label', { 'error-pulse': errors.length > 0 }]">
+              <n-icon :size="16"><AlertCircleIcon /></n-icon>
+              <span>错误日志</span>
+              <span v-if="errors.length > 0" class="tab-badge error">{{ errors.length }}</span>
+            </div>
           </template>
           <div class="log-container">
-            <div :ref="(el) => errorLogRef = el as HTMLElement | null" class="log-content">
+            <div ref="errorLogRef" class="log-content">
               <div v-for="(error, index) in errors" :key="index" class="error-item">
                 <div class="error-item-header">
                   <span class="error-time">{{ new Date(error.timestamp).toLocaleString() }}</span>
@@ -89,7 +101,13 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { NCard, NTabs, NTabPane, NBadge, NTag, NCollapse, NCollapseItem } from 'naive-ui'
+import { NCard, NTabs, NTabPane, NTag, NCollapse, NCollapseItem, NIcon } from 'naive-ui'
+import {
+  List as ListIcon,
+  DocumentText as DocumentTextIcon,
+  CheckmarkCircle as CheckmarkCircleIcon,
+  AlertCircle as AlertCircleIcon
+} from '@vicons/ionicons5'
 
 interface Log {
   timestamp: string
@@ -112,15 +130,7 @@ interface Props {
   errors: Error[]
 }
 
-interface Emits {
-  (e: 'update:allLogRef', ref: HTMLElement | null): void
-  (e: 'update:detailLogRef', ref: HTMLElement | null): void
-  (e: 'update:verifyLogRef', ref: HTMLElement | null): void
-  (e: 'update:errorLogRef', ref: HTMLElement | null): void
-}
-
 const props = defineProps<Props>()
-const emit = defineEmits<Emits>()
 
 const allLogRef = ref<HTMLElement | null>(null)
 const detailLogRef = ref<HTMLElement | null>(null)
@@ -129,47 +139,44 @@ const errorLogRef = ref<HTMLElement | null>(null)
 
 // 自动滚动到底部
 function scrollToBottom(element: HTMLElement | null) {
-  if (element) {
+  if (element && element.parentNode) {
     nextTick(() => {
-      element.scrollTop = element.scrollHeight
+      if (element.parentNode) {
+        element.scrollTop = element.scrollHeight
+      }
     })
   }
 }
 
-// 监听 ref 变化,赋值后立即滚动
-watch(allLogRef, (val) => {
-  emit('update:allLogRef', val)
-  scrollToBottom(val)
-})
-
-watch(detailLogRef, (val) => {
-  emit('update:detailLogRef', val)
-  scrollToBottom(val)
-})
-
-watch(verifyLogRef, (val) => {
-  emit('update:verifyLogRef', val)
-  scrollToBottom(val)
-})
-
-watch(errorLogRef, (val) => {
-  emit('update:errorLogRef', val)
-  scrollToBottom(val)
-})
-
 // 监听日志数据变化,自动滚动到底部
-watch(() => props.allLogs, () => scrollToBottom(allLogRef.value), { deep: true })
-watch(() => props.detailLogs, () => scrollToBottom(detailLogRef.value), { deep: true })
-watch(() => props.verifyLogs, () => scrollToBottom(verifyLogRef.value), { deep: true })
-watch(() => props.errors, () => scrollToBottom(errorLogRef.value), { deep: true })
+watch(() => props.allLogs.length, () => {
+  if (allLogRef.value) {
+    scrollToBottom(allLogRef.value)
+  }
+})
+watch(() => props.detailLogs.length, () => {
+  if (detailLogRef.value) {
+    scrollToBottom(detailLogRef.value)
+  }
+})
+watch(() => props.verifyLogs.length, () => {
+  if (verifyLogRef.value) {
+    scrollToBottom(verifyLogRef.value)
+  }
+})
+watch(() => props.errors.length, () => {
+  if (errorLogRef.value) {
+    scrollToBottom(errorLogRef.value)
+  }
+})
 
 // 组件挂载后滚动到底部
 onMounted(() => {
   nextTick(() => {
-    scrollToBottom(allLogRef.value)
-    scrollToBottom(detailLogRef.value)
-    scrollToBottom(verifyLogRef.value)
-    scrollToBottom(errorLogRef.value)
+    if (allLogRef.value) scrollToBottom(allLogRef.value)
+    if (detailLogRef.value) scrollToBottom(detailLogRef.value)
+    if (verifyLogRef.value) scrollToBottom(verifyLogRef.value)
+    if (errorLogRef.value) scrollToBottom(errorLogRef.value)
   })
 })
 
@@ -180,6 +187,13 @@ function getLevelText(level: string): string {
     error: 'ERROR',
   }
   return levelMap[level] || level.toUpperCase()
+}
+
+function formatCount(count: number): string {
+  if (count >= 1000) {
+    return (count / 1000).toFixed(1) + 'K'
+  }
+  return count.toString()
 }
 </script>
 
@@ -194,6 +208,7 @@ function getLevelText(level: string): string {
   height: 100%;
   display: flex;
   flex-direction: column;
+  border-radius: 12px;
 }
 
 .log-card :deep(.n-card__content) {
@@ -249,6 +264,25 @@ function getLevelText(level: string): string {
   margin-bottom: 4px;
   white-space: pre-wrap;
   word-break: break-all;
+  padding-left: 8px;
+  border-left: 3px solid transparent;
+  transition: background-color 0.2s;
+}
+
+.log-line:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.log-info {
+  border-left-color: #4ec9b0;
+}
+
+.log-warn {
+  border-left-color: #dcdcaa;
+}
+
+.log-error {
+  border-left-color: #f48771;
 }
 
 .log-time {
@@ -335,5 +369,49 @@ function getLevelText(level: string): string {
 
 .log-content::-webkit-scrollbar-thumb:hover {
   background: #777;
+}
+</style>
+
+<!-- 非 scoped 样式，用于 Tab 插槽内容 -->
+<style>
+.log-tabs .tab-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.log-tabs .tab-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  margin-left: 4px;
+}
+
+.log-tabs .tab-badge.detail {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.log-tabs .tab-badge.verify {
+  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+.log-tabs .tab-badge.error {
+  background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+}
+
+.log-tabs .error-pulse {
+  animation: error-pulse-animation 1.5s ease-in-out infinite;
+}
+
+.log-tabs .error-pulse .n-icon {
+  color: #f5576c;
+}
+
+@keyframes error-pulse-animation {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 </style>

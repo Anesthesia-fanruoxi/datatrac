@@ -193,18 +193,6 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         syncConfig: task.syncConfig
       };
       
-      console.log('updateTask - 准备更新任务:', {
-        id,
-        name: task.name,
-        sourceId: task.sourceId,
-        targetId: task.targetId,
-        sourceType: task.sourceType,
-        targetType: task.targetType,
-        mysqlConfig: task.mysqlConfig,
-        esConfig: task.esConfig,
-        syncConfig: task.syncConfig
-      });
-      
       // 构建后端期望的 SyncTask 格式
       const backendTask = {
         id,
@@ -219,12 +207,7 @@ export const useSyncTaskStore = defineStore('syncTask', () => {
         updatedAt: now
       };
       
-      console.log('updateTask - 发送到后端的数据:', backendTask);
-      console.log('updateTask - config JSON:', backendTask.config);
-      
       await invoke('update_task', { id, task: backendTask });
-      
-      console.log('updateTask - 更新成功');
       
       await fetchTasks(); // 刷新列表
     } catch (e) {

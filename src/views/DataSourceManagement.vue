@@ -640,29 +640,23 @@ async function loadDataSources() {
 }
 
 async function handleBatchTest() {
-  console.log('开始批量测试')
   showBatchTestDialog.value = true
   // 等待对话框打开
   await new Promise(resolve => setTimeout(resolve, 100))
-  console.log('调用 startTest')
   batchTestDialogRef.value?.startTest()
 }
 
 async function handleBatchTestExecute(skipFailedStep1: boolean) {
-  console.log('执行批量测试, skipFailedStep1:', skipFailedStep1)
   try {
     // 监听批量测试步骤事件
     const { listen } = await import('@tauri-apps/api/event')
     const unlisten = await listen('batch-test-step', (event: any) => {
-      console.log('收到测试步骤事件:', event.payload)
       const result: BatchTestDataSourceResult = event.payload
       batchTestDialogRef.value?.updateResult(result)
     })
     
     // 执行批量测试
-    console.log('调用后端批量测试...')
     const result = await dataSourceStore.batchTestConnections(skipFailedStep1)
-    console.log('批量测试完成, 结果:', result)
     
     // 如果是第一次测试(skipFailedStep1=false)且步骤1有失败
     if (!skipFailedStep1) {
@@ -675,7 +669,6 @@ async function handleBatchTestExecute(skipFailedStep1: boolean) {
         const step1Failed = step1Only.filter(r => !r.steps[0].success).length
         
         if (step1Failed > 0) {
-          console.log('步骤1有失败,显示确认对话框')
           // 显示确认对话框
           batchTestDialogRef.value?.checkStep1Failures()
           unlisten()
@@ -685,7 +678,6 @@ async function handleBatchTestExecute(skipFailedStep1: boolean) {
     }
     
     // 测试完成
-    console.log('测试完成')
     batchTestDialogRef.value?.finishTest()
     unlisten()
   } catch (error) {

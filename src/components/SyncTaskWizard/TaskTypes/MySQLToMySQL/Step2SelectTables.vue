@@ -361,21 +361,17 @@ async function loadAllTables() {
   loading.value = true
   try {
     const dbList = await syncTaskStore.fetchDatabases(props.sourceId)
-    console.log('加载的数据库列表:', dbList)
     
     // 过滤系统库
     const systemDatabases = ['information_schema', 'mysql', 'performance_schema', 'sys']
     const userDbList = dbList.filter(db => !systemDatabases.includes(db.toLowerCase()))
-    console.log('过滤后的数据库列表:', userDbList)
     
     const result = []
     for (const db of userDbList) {
       const tables = await syncTaskStore.fetchTables(props.sourceId, db)
-      console.log(`数据库 ${db} 的表:`, tables)
       result.push({ name: db, tables })
     }
     databases.value = result
-    console.log('所有数据库和表:', databases.value)
   } catch (error) {
     console.error('加载表失败:', error)
   } finally {

@@ -281,6 +281,7 @@ const currentStepProps = computed(() => {
         searchGroups: esSearchGroups.value,
         modelValue: esSelectedIndices.value,
         'onUpdate:modelValue': (val: string[]) => { esSelectedIndices.value = val },
+        'onUpdate:searchGroups': (val: ESSearchGroup[]) => { esSearchGroups.value = val },
         indexNameTransform: esIndexNameTransform.value,
         'onUpdate:indexNameTransform': (val: IndexNameTransform) => { esIndexNameTransform.value = val }
       }
@@ -421,8 +422,6 @@ watch(() => props.modelValue, (newValue) => {
     // 编辑模式：从 formData 恢复任务类型和配置数据
     const { sourceType, targetType, mysqlConfig, esConfig } = props.formData
     
-    console.log('编辑模式 - 恢复任务数据:', props.formData)
-    
     if (sourceType && targetType) {
       taskType.value = `${sourceType}-${targetType}` as SyncTaskType
       sourceTypeSelected.value = sourceType
@@ -437,13 +436,11 @@ watch(() => props.modelValue, (newValue) => {
             selectedTables.value.push(`${db.database}.${table}`)
           })
         })
-        console.log('编辑模式 - 恢复 selectedTables:', selectedTables.value)
       }
       
       // 恢复数据库名称转换配置
       if (props.formData.syncConfig?.dbNameTransform) {
         dbNameTransform.value = props.formData.syncConfig.dbNameTransform
-        console.log('编辑模式 - 恢复 dbNameTransform:', dbNameTransform.value)
       }
       
       // 恢复 ES 配置
@@ -451,15 +448,12 @@ watch(() => props.modelValue, (newValue) => {
         // ES→ES 配置
         if (esConfig.searchGroups) {
           esSearchGroups.value = esConfig.searchGroups
-          console.log('编辑模式 - 恢复 esSearchGroups:', esSearchGroups.value)
         }
         if (esConfig.selectedIndices) {
           esSelectedIndices.value = esConfig.selectedIndices
-          console.log('编辑模式 - 恢复 esSelectedIndices:', esSelectedIndices.value)
         }
         if (esConfig.indexNameTransform) {
           esIndexNameTransform.value = esConfig.indexNameTransform
-          console.log('编辑模式 - 恢复 esIndexNameTransform:', esIndexNameTransform.value)
         }
         
         // ES→MySQL 配置
@@ -467,8 +461,6 @@ watch(() => props.modelValue, (newValue) => {
           const firstIndex = esConfig.indices[0]
           indexPattern.value = firstIndex.pattern || ''
           matchedIndices.value = firstIndex.matchedIndices || []
-          console.log('编辑模式 - 恢复 indexPattern:', indexPattern.value)
-          console.log('编辑模式 - 恢复 matchedIndices:', matchedIndices.value)
         }
       }
     }
@@ -615,14 +607,21 @@ function handleSubmit() {
     targetType: targetTypeFromTask.value
   }
   
-  console.log('handleSubmit - 开始构建提交数据')
-  console.log('handleSubmit - taskType:', taskType.value)
-  console.log('handleSubmit - formData:', props.formData)
-  
   // 根据任务类型构建配置
   if (taskType.value === 'elasticsearch-elasticsearch') {
+    // 保存完整的 searchGroups（包含所有匹配的索引和选中状态）
+    // 这样编辑时可以恢复完整的过滤结果和选择状态
+    const savedSearchGroups: ESSearchGroup[] = esSearchGroups.value.map(group => ({
+      pattern: group.pattern,
+      matchedIndices: group.matchedIndices, // 保存所有匹配的索引
+      selectedIndices: group.selectedIndices || [], // 保存选中的索引
+      loading: false
+    }))
+    
+    console.log('handleSubmit - savedSearchGroups:', JSON.stringify(savedSearchGroups, null, 2))
+    
     submitData.esConfig = {
-      searchGroups: esSearchGroups.value,
+      searchGroups: savedSearchGroups,  // 保存完整信息
       selectedIndices: esSelectedIndices.value,
       indexNameTransform: esIndexNameTransform.value
     }
@@ -644,8 +643,6 @@ function handleSubmit() {
       }))
     }
     
-    console.log('handleSubmit - MySQL 配置:', submitData.mysqlConfig)
-    
     if (taskType.value === 'mysql-mysql' && dbNameTransform.value.enabled) {
       submitData.syncConfig = {
         ...submitData.syncConfig!,
@@ -659,11 +656,7 @@ function handleSubmit() {
         matchedIndices: matchedIndices.value
       }]
     }
-    console.log('handleSubmit - ES→MySQL 配置:', submitData.esConfig)
   }
-  
-  console.log('handleSubmit - 最终提交数据:', submitData)
-  console.log('handleSubmit - syncConfig:', submitData.syncConfig)
   
   emit('submit', submitData)
   handleCancel()

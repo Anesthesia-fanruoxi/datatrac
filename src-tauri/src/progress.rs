@@ -452,7 +452,44 @@ impl ProgressMonitor {
         let mut map = self.current_progress.write().unwrap();
         
         if let Some(progress) = map.get_mut(task_id) {
-            progress.task_units = task_units;
+            progress.task_units = task_units.clone();
+            
+            // 聚合任务级别的进度数据
+            let total_records: u64 = task_units.iter().map(|u| u.total_records).sum();
+            let processed_records: u64 = task_units.iter().map(|u| u.processed_records).sum();
+            
+            progress.total_records = total_records;
+            progress.processed_records = processed_records;
+            
+            // 计算百分比
+            if total_records > 0 {
+                progress.percentage = (processed_records as f64 / total_records as f64) * 100.0;
+            } else {
+                progress.percentage = 0.0;
+            }
+            
+            // 计算速度和预估时间
+            let start_timestamp = chrono::DateTime::parse_from_rfc3339(&progress.start_time)
+                .ok()
+                .map(|dt| dt.timestamp() as u64);
+            
+            if let Some(start_timestamp) = start_timestamp {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let elapsed = now.saturating_sub(start_timestamp);
+                
+                if elapsed > 0 && processed_records > 0 {
+                    progress.speed = processed_records as f64 / elapsed as f64;
+                    
+                    // 预估剩余时间
+                    if progress.speed > 0.0 {
+                        let remaining = total_records.saturating_sub(processed_records);
+                        progress.estimated_time = (remaining as f64 / progress.speed) as u64;
+                    }
+                }
+            }
             
             let progress_clone = progress.clone();
             drop(map);

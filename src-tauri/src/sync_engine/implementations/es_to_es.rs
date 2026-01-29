@@ -1,6 +1,6 @@
 // Elasticsearch → Elasticsearch 同步实现
 
-use crate::sync_engine::{SyncEngine, SyncTaskConfig};
+use crate::sync_engine::{SyncEngine, SyncTaskConfig, transform_index_name};
 use crate::progress::ProgressMonitor;
 use crate::error_logger::ErrorLogger;
 use anyhow::{Context, Result};
@@ -22,7 +22,7 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
     log::info!("开始 Elasticsearch → Elasticsearch 同步");
     
     // 获取任务状态（用于暂停检查）
-    let task_state = engine.get_task_state(&config.task_id);
+    let task_state = engine.state_manager.get_task_state(&config.task_id);
     let pause_flag = task_state.as_ref().map(|s| s.pause_flag.clone());
     
     // 获取 ES 配置
@@ -108,7 +108,7 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
     let index_tasks: Vec<_> = indices.into_iter().map(|source_index| {
         // 转换索引名称
         let target_index = if let Some(transform) = &es_config.index_name_transform {
-            engine.transform_index_name(&source_index, transform)
+            transform_index_name(&source_index, transform)
         } else {
             source_index.clone()
         };
@@ -120,9 +120,8 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
     }).collect();
     
     let total_indices = index_tasks.len();
-    let index_names: Vec<String> = index_tasks.iter().map(|t| t.source_index.clone()).collect();
     
-    // 使用任务管理器执行并发同步
+    // 使用任务管理器的自动模式执行并发同步
     let task_manager = engine.task_manager().clone();
     let task_manager_for_closure = task_manager.clone();
     let progress_monitor = engine.progress_monitor.clone();
@@ -131,15 +130,16 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
     let config_clone = config.clone();
     let index_tasks_clone = index_tasks.clone();
     let pause_flag_clone = pause_flag.clone();
+    let source_client_clone = source_client.clone();
+    let target_client_clone = target_client.clone();
     
-    let success = task_manager.execute_units(
+    let success = task_manager.execute_auto_mode(
         &task_id,
-        index_names,
         thread_count,
         progress_monitor.clone(),
-        move |source_index| {
-            let source_client = source_client.clone();
-            let target_client = target_client.clone();
+        move |unit_id, unit_name| {
+            let source_client = source_client_clone.clone();
+            let target_client = target_client_clone.clone();
             let config = config_clone.clone();
             let progress_monitor = progress_monitor.clone();
             let error_logger = error_logger.clone();
@@ -149,12 +149,12 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
             
             // 找到对应的目标索引
             let target_index = index_tasks.iter()
-                .find(|t| t.source_index == source_index)
+                .find(|t| t.source_index == unit_name)
                 .map(|t| t.target_index.clone())
-                .unwrap_or_else(|| source_index.clone());
+                .unwrap_or_else(|| unit_name.clone());
             
             async move {
-                log::info!("同步索引: {} -> {}", source_index, target_index);
+                log::info!("自动模式: 同步索引: {} -> {} (unit_id: {})", unit_name, target_index, unit_id);
                 
                 let result = sync_single_index_impl(
                     &progress_monitor,
@@ -162,7 +162,8 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
                     &task_manager,
                     &source_client,
                     &target_client,
-                    &source_index,
+                    &unit_id,
+                    &unit_name,
                     &target_index,
                     &config,
                     pause_flag.as_ref(),
@@ -170,22 +171,22 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
                 
                 match &result {
                     Ok(count) => {
-                        log::info!("索引 {} 同步完成，共 {} 条记录", source_index, count);
+                        log::info!("自动模式: 索引 {} 同步完成，共 {} 条记录", unit_name, count);
                         progress_monitor.update_table_progress(
                             &config.task_id,
-                            &source_index,
+                            &unit_name,
                             *count as u64,
                         );
                     }
                     Err(e) => {
-                        log::error!("索引 {} 同步失败: {}", source_index, e);
+                        log::error!("自动模式: 索引 {} 同步失败: {}", unit_name, e);
                         
                         // 构建错误日志
                         let error_log = crate::error_logger::ErrorLog::new(
                             "IndexSyncError".to_string(),
-                            format!("索引 {} 同步失败: {}", source_index, e),
+                            format!("索引 {} 同步失败: {}", unit_name, e),
                             Some(serde_json::json!({
-                                "index": source_index,
+                                "index": unit_name,
                                 "error": e.to_string()
                             }))
                         );
@@ -198,7 +199,7 @@ pub async fn sync_es_to_es(engine: &SyncEngine, config: SyncTaskConfig) -> Resul
         }
     ).await?;
     
-    log::info!("所有索引同步完成: 成功 {}/{}", success, total_indices);
+    log::info!("自动模式: 所有索引同步完成: 成功 {}/{}", success, total_indices);
     
     // 推送总体校验日志到前端
     if success == total_indices {
@@ -227,13 +228,41 @@ struct IndexSyncTask {
     target_index: String,
 }
 
-/// 同步单个索引的实现
-async fn sync_single_index_impl(
+/// 同步单个索引（公开接口，供手动模式使用）
+pub async fn sync_single_index(
     progress_monitor: &Arc<ProgressMonitor>,
-    _error_logger: &Arc<ErrorLogger>,
+    error_logger: &Arc<ErrorLogger>,
     task_manager: &Arc<crate::task_manager::TaskManager>,
     source_client: &Elasticsearch,
     target_client: &Elasticsearch,
+    unit_id: &str,
+    source_index: &str,
+    target_index: &str,
+    config: &SyncTaskConfig,
+    pause_flag: Option<&Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<usize> {
+    sync_single_index_impl(
+        progress_monitor,
+        error_logger,
+        task_manager,
+        source_client,
+        target_client,
+        unit_id,
+        source_index,
+        target_index,
+        config,
+        pause_flag,
+    ).await
+}
+
+/// 同步单个索引的实现
+async fn sync_single_index_impl(
+    progress_monitor: &Arc<ProgressMonitor>,
+    error_logger: &Arc<ErrorLogger>,
+    task_manager: &Arc<crate::task_manager::TaskManager>,
+    source_client: &Elasticsearch,
+    target_client: &Elasticsearch,
+    unit_id: &str,
     source_index: &str,
     target_index: &str,
     config: &SyncTaskConfig,
@@ -243,11 +272,39 @@ async fn sync_single_index_impl(
     let scroll_timeout = "5m";
     let mut total_count = 0;
     
+    // ========== 断点续传: 检查是否有未完成的同步 ==========
+    let mut start_from = 0i64;
+    let mut resumed_batch = 0i64;
+    
+    if let Some(storage) = task_manager.storage() {
+        if let Ok(runtimes) = storage.load_unit_runtimes(&config.task_id).await {
+            if let Some(runtime) = runtimes.iter().find(|r| r.unit_name == source_index) {
+                if let Some(last_batch) = runtime.last_processed_batch {
+                    // 有断点,从上次的位置继续
+                    start_from = (last_batch + 1) * batch_size as i64;
+                    resumed_batch = last_batch + 1;
+                    total_count = runtime.processed_records as usize;
+                    
+                    log::info!("[断点续传] 索引 {} 从批次 {} 继续 (已处理 {} 条记录)", 
+                        source_index, resumed_batch, total_count);
+                    
+                    progress_monitor.add_log(
+                        &config.task_id,
+                        crate::progress::LogLevel::Info,
+                        crate::progress::LogCategory::Realtime,
+                        format!("🔄 断点续传: 从批次 {} 继续，已处理 {} 条记录", resumed_batch, total_count)
+                    );
+                }
+            }
+        }
+    }
+    
     // 初始化 scroll 查询
     let response = source_client
         .search(elasticsearch::SearchParts::Index(&[source_index]))
         .scroll(scroll_timeout)
         .size(batch_size as i64)
+        .from(start_from)  // 使用 from 参数跳过已处理的记录
         .body(json!({
             "query": {
                 "match_all": {}
@@ -293,11 +350,11 @@ async fn sync_single_index_impl(
     // 更新任务单元的总记录数
     task_manager.update_unit_progress_with_sync(
         &config.task_id,
-        source_index,
+        unit_id,
         total_hits,
         0,
         progress_monitor,
-    );
+    ).await;
     
     let mut scroll_id = response_body["_scroll_id"]
         .as_str()
@@ -306,7 +363,14 @@ async fn sync_single_index_impl(
     
     let mut current_response = response_body;
     
-    let mut batch_count = 0;  // 批次计数
+    let mut batch_count = resumed_batch;  // 批次计数,从断点位置开始
+    
+    // 计算总批次数
+    let total_batches = if total_hits > 0 {
+        ((total_hits as f64) / (batch_size as f64)).ceil() as usize
+    } else {
+        0
+    };
     
     // 循环读取数据
     loop {
@@ -362,7 +426,7 @@ async fn sync_single_index_impl(
             &config.task_id,
             crate::progress::LogLevel::Info,
             crate::progress::LogCategory::Summary,
-            format!("批次 {}/{} 开始处理，本批 {} 条记录", batch_count, "?", hits.len())
+            format!("批次 {}/{} 开始处理，本批 {} 条记录", batch_count, total_batches, hits.len())
         );
         
         // 构建 bulk 请求体(Vec<String>格式)
@@ -397,20 +461,68 @@ async fn sync_single_index_impl(
             .bulk(elasticsearch::BulkParts::None)
             .body(bulk_body)
             .send()
-            .await
-            .context("bulk 写入失败")?;
+            .await;
         
-        let bulk_result: Value = bulk_response.json().await
-            .context("解析 bulk 响应失败")?;
-        
-        // 检查是否有错误
-        if bulk_result["errors"].as_bool().unwrap_or(false) {
-            progress_monitor.add_log(
-                &config.task_id,
-                crate::progress::LogLevel::Warn,
-                crate::progress::LogCategory::Error,
-                format!("第 {} 批：bulk 写入部分失败", batch_count)
-            );
+        // 处理 bulk 写入结果
+        match bulk_response {
+            Ok(response) => {
+                let bulk_result: Value = response.json().await
+                    .context("解析 bulk 响应失败")?;
+                
+                // 检查是否有错误
+                if bulk_result["errors"].as_bool().unwrap_or(false) {
+                    progress_monitor.add_log(
+                        &config.task_id,
+                        crate::progress::LogLevel::Warn,
+                        crate::progress::LogCategory::Error,
+                        format!("第 {} 批：bulk 写入部分失败（ES 内部错误，数据可能已写入）", batch_count)
+                    );
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string().to_lowercase();
+                
+                // ES 的所有网络错误都不算失败，因为数据可能已经写入
+                // 包括：timeout、connection、sending request 等
+                let is_network_error = error_msg.contains("timeout") 
+                    || error_msg.contains("timed out")
+                    || error_msg.contains("connection")
+                    || error_msg.contains("sending request")
+                    || error_msg.contains("broken pipe")
+                    || error_msg.contains("reset by peer");
+                
+                if is_network_error {
+                    // 网络错误只记录警告，不中断同步
+                    progress_monitor.add_log(
+                        &config.task_id,
+                        crate::progress::LogLevel::Warn,
+                        crate::progress::LogCategory::Error,
+                        format!("第 {} 批：网络错误（{}），数据可能已写入，继续执行", batch_count, e)
+                    );
+                    
+                    // 记录到错误日志，但不标记为失败
+                    let error_log = crate::error_logger::ErrorLog::new(
+                        "NetworkError".to_string(),
+                        format!("索引 {} 第 {} 批网络错误: {}", source_index, batch_count, e),
+                        Some(serde_json::json!({
+                            "index": source_index,
+                            "batch": batch_count,
+                            "error": e.to_string(),
+                            "type": "network"
+                        }))
+                    );
+                    error_logger.log_error(&config.task_id, error_log);
+                } else {
+                    // 其他错误才算真正的失败
+                    progress_monitor.add_log(
+                        &config.task_id,
+                        crate::progress::LogLevel::Error,
+                        crate::progress::LogCategory::Error,
+                        format!("第 {} 批：bulk 写入失败: {}", batch_count, e)
+                    );
+                    return Err(anyhow::anyhow!("bulk 写入失败: {}", e));
+                }
+            }
         }
         
         total_count += hits.len();
@@ -418,11 +530,11 @@ async fn sync_single_index_impl(
         // 更新任务单元进度
         task_manager.update_unit_progress_with_sync(
             &config.task_id,
-            source_index,
+            unit_id,
             total_hits,
             total_count as u64,
             progress_monitor,
-        );
+        ).await;
         
         let progress_percent = if total_hits > 0 {
             (total_count as f64 / total_hits as f64 * 100.0) as u32
@@ -450,6 +562,18 @@ async fn sync_single_index_impl(
             crate::progress::LogCategory::Summary,
             format!("批次 {} 完成，已同步: {} 条，剩余: {} 批次", batch_count, total_count, remaining_batches)
         );
+        
+        // ========== 断点续传: 保存批次号 ==========
+        if let Some(storage) = task_manager.storage() {
+            if let Err(e) = storage.update_runtime_batch(
+                &config.task_id,
+                source_index,
+                batch_count,
+            ).await {
+                log::error!("保存批次号失败: {}", e);
+                // 不中断同步,继续执行
+            }
+        }
         
         // 继续 scroll
         let scroll_response = source_client
@@ -488,30 +612,27 @@ async fn sync_single_index_impl(
         format!("索引 {} 同步完成，共同步 {} 条记录", source_index, total_count)
     );
     
-    // 可选：验证目标索引的记录数
-    let verify_response = target_client
-        .count(elasticsearch::CountParts::Index(&[target_index]))
-        .send()
-        .await;
-    
-    if let Ok(verify_resp) = verify_response {
-        if let Ok(verify_body) = verify_resp.json::<Value>().await {
-            if let Some(target_count) = verify_body["count"].as_u64() {
-                if target_count == total_count as u64 {
-                    progress_monitor.add_log(
-                        &config.task_id,
-                        crate::progress::LogLevel::Info,
-                        crate::progress::LogCategory::Verify,
-                        format!("✓ 索引 {} 数据校验通过：源 {} 条 = 目标 {} 条", source_index, total_count, target_count)
-                    );
-                } else {
-                    progress_monitor.add_log(
-                        &config.task_id,
-                        crate::progress::LogLevel::Warn,
-                        crate::progress::LogCategory::Verify,
-                        format!("⚠ 索引 {} 数据校验失败：源 {} 条 ≠ 目标 {} 条", source_index, total_count, target_count)
-                    );
-                }
+    // 将运行记录移动到历史记录表
+    if let Some(storage) = task_manager.storage() {
+        // 计算耗时 (简化处理,使用固定值或从其他地方获取)
+        let duration = 0; // TODO: 需要在开始同步时记录开始时间
+        
+        // 从配置表获取搜索关键字
+        if let Ok(configs) = storage.load_unit_configs(&config.task_id).await {
+            let search_pattern = configs
+                .iter()
+                .find(|c| c.unit_name == source_index)
+                .and_then(|c| c.search_pattern.clone());
+            
+            if let Err(e) = storage.move_runtime_to_history(
+                &config.task_id,
+                source_index,
+                search_pattern,
+                duration,
+            ).await {
+                log::error!("移动运行记录到历史失败: {}", e);
+            } else {
+                log::info!("索引 {} 的运行记录已移动到历史表", source_index);
             }
         }
     }

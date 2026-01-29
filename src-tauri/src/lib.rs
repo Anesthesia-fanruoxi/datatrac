@@ -176,6 +176,12 @@ pub fn run() {
       commands::get_progress,
       commands::get_errors,
       commands::get_task_logs,
+      // 任务单元管理
+      commands::get_task_units,
+      commands::get_task_histories,
+      commands::reset_failed_units,
+      commands::reset_unit,
+      commands::clear_task_units_by_pattern,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

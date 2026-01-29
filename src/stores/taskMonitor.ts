@@ -68,12 +68,8 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       // 启动事件监听
       await startEventListeners();
       
-      console.log('启动任务:', taskId);
-      
-      // 直接传递任务 ID,后端会从数据库加载配置
+      // 传递任务 ID
       await invoke('start_sync', { taskId });
-      
-      console.log('任务启动成功');
     } catch (e) {
       error.value = `启动任务失败: ${e}`;
       console.error('startTask error:', e);
@@ -167,6 +163,22 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     }
   }
 
+  /**
+   * 获取任务单元列表（包含状态统计）
+   * 用于断点续传和进度展示
+   * 返回: { newUnits: 新增同步, completedUnits: 已完成同步, statistics: 统计 }
+   */
+  async function getTaskUnits(taskId: string): Promise<{ newUnits: any[], completedUnits: any[], statistics: any }> {
+    try {
+      const result = await invoke<{ newUnits: any[], completedUnits: any[], statistics: any }>('get_task_units', { taskId });
+      return result;
+    } catch (e) {
+      error.value = `获取任务单元失败: ${e}`;
+      console.error('getTaskUnits error:', e);
+      return { newUnits: [], completedUnits: [], statistics: { total: 0, pending: 0, running: 0, completed: 0, failed: 0, paused: 0 } };
+    }
+  }
+
   // ==================== 事件监听方法 ====================
 
   /**
@@ -181,16 +193,12 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       // 监听进度更新事件
       progressUnlisten = await listen<TaskProgress>('task-progress', (event) => {
         progress.value = event.payload;
-        console.log('Progress update:', event.payload);
       });
       
       // 监听错误事件
       errorUnlisten = await listen<ErrorLog>('task-error', (event) => {
         errors.value.push(event.payload);
-        console.log('Error logged:', event.payload);
       });
-      
-      console.log('Event listeners started');
     } catch (e) {
       console.error('Failed to start event listeners:', e);
       throw e;
@@ -210,8 +218,6 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       errorUnlisten();
       errorUnlisten = null;
     }
-    
-    console.log('Event listeners stopped');
   }
 
   /**
@@ -227,6 +233,47 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
    */
   function clearError(): void {
     error.value = null;
+  }
+
+  /**
+   * 重置失败的任务单元
+   */
+  async function resetFailedUnits(taskId: string): Promise<number> {
+    try {
+      const count = await invoke<number>('reset_failed_units', { taskId });
+      return count;
+    } catch (e) {
+      error.value = `重置失败单元失败: ${e}`;
+      console.error('resetFailedUnits error:', e);
+      throw e;
+    }
+  }
+
+  /**
+   * 重置指定的任务单元
+   */
+  async function resetUnit(unitId: string): Promise<void> {
+    try {
+      await invoke('reset_unit', { unitId });
+    } catch (e) {
+      error.value = `重置单元失败: ${e}`;
+      console.error('resetUnit error:', e);
+      throw e;
+    }
+  }
+  
+  /**
+   * 按搜索关键字清除任务单元记录
+   */
+  async function clearTaskUnitsByPattern(taskId: string, pattern: string): Promise<number> {
+    try {
+      const count = await invoke<number>('clear_task_units_by_pattern', { taskId, pattern });
+      return count;
+    } catch (e) {
+      error.value = `清除记录失败: ${e}`;
+      console.error('clearTaskUnitsByPattern error:', e);
+      throw e;
+    }
   }
 
   // ==================== 返回 ====================
@@ -250,6 +297,10 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     getProgress,
     getErrors,
     getTaskLogs,
+    getTaskUnits,
+    resetFailedUnits,
+    resetUnit,
+    clearTaskUnitsByPattern,
     
     // 事件监听方法
     startEventListeners,

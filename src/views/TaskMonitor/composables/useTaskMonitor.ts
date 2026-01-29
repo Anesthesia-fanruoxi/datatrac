@@ -15,13 +15,8 @@ export function useTaskMonitor() {
   // ========== 状态 ==========
   const selectedTaskId = ref<string>('')
   const allLogs = ref<any[]>([])
-  const allLogContentRef = ref<HTMLElement>()
-  const detailLogContentRef = ref<HTMLElement>()
-  const verifyLogContentRef = ref<HTMLElement>()
-  const errorLogContentRef = ref<HTMLElement>()
 
   let unlistenLog: UnlistenFn | null = null
-  let unlistenError: UnlistenFn | null = null
 
   // ========== 计算属性 ==========
   const progress = computed(() => {
@@ -37,11 +32,17 @@ export function useTaskMonitor() {
     return allLogs.value.filter(log => log.category === 'verify')
   })
 
-  const sortedTaskUnits = computed(() => {
+  const sortedTaskUnits = computed<import('../../../types').TaskUnit[]>(() => {
     if (!progress.value?.taskUnits) return []
     
     const units = [...progress.value.taskUnits]
-    const statusOrder: Record<string, number> = { running: 1, pending: 2, completed: 3, failed: 4 }
+    // 排序: 进行中 > 等待 > 失败 > 已完成
+    const statusOrder: Record<string, number> = { 
+      running: 1, 
+      pending: 2, 
+      failed: 3, 
+      completed: 4 
+    }
     
     return units.sort((a, b) => {
       const statusDiff = (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
@@ -52,6 +53,23 @@ export function useTaskMonitor() {
 
   const isRunning = computed(() => progress.value?.status === 'running')
   const isPaused = computed(() => progress.value?.status === 'paused')
+
+  // 已处理记录数（格式化显示）
+  const processedRecordsFormatted = computed(() => {
+    const count = progress.value?.processedRecords || 0
+    if (count >= 1000000) {
+      return (count / 1000000).toFixed(2) + 'M'
+    } else if (count >= 1000) {
+      return (count / 1000).toFixed(1) + 'K'
+    }
+    return count.toLocaleString()
+  })
+
+  // 总进度百分比
+  const totalProgressFormatted = computed(() => {
+    const percentage = progress.value?.percentage || 0
+    return percentage.toFixed(1)
+  })
 
   // ========== 辅助函数 ==========
   function getSelectedTask() {
@@ -99,19 +117,16 @@ export function useTaskMonitor() {
     else return `${secs}s`
   }
 
-  function scrollToBottom(element?: HTMLElement) {
-    if (element) {
-      element.scrollTop = element.scrollHeight
-    }
-  }
-
   // ========== 任务操作 ==========
   function handleTaskSelect(taskId: string) {
     selectedTaskId.value = taskId
     allLogs.value = []
-    loadProgress()
-    loadErrors()
-    loadLogs()
+    // 使用 Promise.all 确保所有异步操作都正确处理
+    Promise.all([
+      loadProgress().catch(() => {}),
+      loadErrors().catch(() => {}),
+      loadLogs().catch(() => {})
+    ]).catch(() => {})
   }
 
   async function handleStart() {
@@ -162,6 +177,8 @@ export function useTaskMonitor() {
     }
   }
 
+
+
   // ========== 数据加载 ==========
   async function loadTasks() {
     try {
@@ -175,10 +192,96 @@ export function useTaskMonitor() {
     if (!selectedTaskId.value) return
     try {
       await taskMonitorStore.getProgress(selectedTaskId.value)
+      // 同时加载任务单元
+      await loadTaskUnits()
     } catch (error) {
       // 静默失败
+      console.warn('[useTaskMonitor] 加载进度失败:', error)
     }
   }
+
+  async function loadTaskUnits() {
+    if (!selectedTaskId.value) return
+    try {
+      const response = await taskMonitorStore.getTaskUnits(selectedTaskId.value)
+      
+      // 响应包含 newUnits, completedUnits 和 statistics
+      const newUnits = response.newUnits || []
+      const completedUnits = response.completedUnits || []
+      const statistics = response.statistics || {
+        total: 0,
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+        paused: 0
+      }
+      
+      // 转换新增单元数据
+      const newTaskUnits = newUnits.map((unit: any) => {
+        const totalRecords = unit.totalRecords || 0
+        const processedRecords = unit.processedRecords || 0
+        const percentage = totalRecords > 0 
+          ? (processedRecords / totalRecords) * 100 
+          : 0
+        
+        return {
+          id: unit.id,
+          name: unit.unitName,
+          status: unit.status,
+          totalRecords: totalRecords,
+          processedRecords: processedRecords,
+          percentage: percentage,
+          errorMessage: unit.errorMessage,
+          searchPattern: unit.searchPattern,
+          isNew: true, // 标记为新增
+        }
+      })
+      
+      // 转换已完成单元数据
+      const completedTaskUnits = completedUnits.map((unit: any) => {
+        return {
+          id: unit.id,
+          name: unit.unitName,
+          status: 'completed',
+          totalRecords: unit.totalRecords || 0,
+          processedRecords: unit.totalRecords || 0,
+          percentage: 100,
+          errorMessage: null,
+          searchPattern: unit.searchPattern,
+          completedAt: unit.completedAt,
+          duration: unit.duration,
+          isNew: false, // 标记为已完成
+        }
+      })
+      
+      // 合并所有单元
+      const allTaskUnits = [...newTaskUnits, ...completedTaskUnits]
+      
+      // 将任务单元数据设置到 progress
+      if (!progress.value) {
+        // 如果 progress 为空,创建一个初始对象
+        taskMonitorStore.progress = {
+          taskId: selectedTaskId.value,
+          status: 'idle',
+          totalRecords: 0,
+          processedRecords: 0,
+          percentage: 0,
+          speed: 0,
+          estimatedTime: 0,
+          startTime: '',
+          taskUnits: allTaskUnits,
+          statistics: statistics
+        }
+      } else {
+        progress.value.taskUnits = allTaskUnits
+        progress.value.statistics = statistics
+      }
+    } catch (error) {
+      console.error('[useTaskMonitor] 加载任务单元失败:', error)
+    }
+  }
+
 
   async function loadErrors() {
     if (!selectedTaskId.value) return
@@ -186,6 +289,7 @@ export function useTaskMonitor() {
       await taskMonitorStore.getErrors(selectedTaskId.value)
     } catch (error) {
       // 静默失败
+      console.warn('[useTaskMonitor] 加载错误日志失败:', error)
     }
   }
 
@@ -193,9 +297,9 @@ export function useTaskMonitor() {
     if (!selectedTaskId.value) return
     try {
       allLogs.value = await taskMonitorStore.getTaskLogs(selectedTaskId.value)
-      setTimeout(() => scrollToBottom(allLogContentRef.value), 100)
     } catch (error) {
       // 静默失败
+      console.warn('[useTaskMonitor] 加载日志失败:', error)
     }
   }
 
@@ -209,19 +313,14 @@ export function useTaskMonitor() {
           if (allLogs.value.length > 5000) {
             allLogs.value.shift()
           }
-          setTimeout(() => {
-            scrollToBottom(allLogContentRef.value)
-            scrollToBottom(detailLogContentRef.value)
-            scrollToBottom(verifyLogContentRef.value)
-          }, 50)
         }
       })
       
-      unlistenError = await listen('task-error', (event: any) => {
-        const errorEvent = event.payload
-        if (errorEvent.taskId === selectedTaskId.value) {
-          loadErrors()
-          setTimeout(() => scrollToBottom(errorLogContentRef.value), 50)
+      // 监听任务单元更新事件
+      await listen('task-units-updated', (event: any) => {
+        const { taskId } = event.payload
+        if (taskId === selectedTaskId.value) {
+          loadTaskUnits().catch(() => {})
         }
       })
     } catch (error) {
@@ -234,25 +333,28 @@ export function useTaskMonitor() {
       unlistenLog()
       unlistenLog = null
     }
-    if (unlistenError) {
-      unlistenError()
-      unlistenError = null
-    }
   }
 
   // ========== 初始化 ==========
   async function initialize() {
-    await dataSourceStore.fetchDataSources()
-    await loadTasks()
-    await taskMonitorStore.startEventListeners()
-    await startListening()
-    
-    const taskId = route.query.taskId as string
-    if (taskId) {
-      selectedTaskId.value = taskId
-      loadProgress()
-      loadErrors()
-      loadLogs()
+    try {
+      await dataSourceStore.fetchDataSources()
+      await loadTasks()
+      await taskMonitorStore.startEventListeners()
+      await startListening()
+      
+      const taskId = route.query.taskId as string
+      if (taskId) {
+        selectedTaskId.value = taskId
+        // 使用 Promise.all 确保所有异步操作都正确处理
+        await Promise.all([
+          loadProgress().catch(() => {}),
+          loadErrors().catch(() => {}),
+          loadLogs().catch(() => {})
+        ])
+      }
+    } catch (error) {
+      console.error('[useTaskMonitor] 初始化失败:', error)
     }
   }
 
@@ -265,10 +367,6 @@ export function useTaskMonitor() {
     // 状态
     selectedTaskId,
     allLogs,
-    allLogContentRef,
-    detailLogContentRef,
-    verifyLogContentRef,
-    errorLogContentRef,
     // 计算属性
     progress,
     detailLogs,
@@ -276,6 +374,8 @@ export function useTaskMonitor() {
     sortedTaskUnits,
     isRunning,
     isPaused,
+    processedRecordsFormatted,
+    totalProgressFormatted,
     // Store
     syncTaskStore,
     taskMonitorStore,

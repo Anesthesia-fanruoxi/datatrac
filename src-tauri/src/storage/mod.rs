@@ -4,8 +4,13 @@
 mod models;
 mod data_source_ops;
 mod sync_task_ops;
+mod task_unit_new_ops;
 
-pub use models::{DataSource, DataSourceType, SyncTask, TaskStatus};
+pub use models::{
+    DataSource, DataSourceType, SyncTask, TaskStatus,
+    TaskUnitStatus, TaskUnitType,
+    TaskUnitConfig, TaskUnitRuntime, TaskUnitHistory,
+};
 
 use anyhow::{Context, Result};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -48,7 +53,7 @@ impl Storage {
 
     /// 初始化数据库 schema
     /// 
-    /// 创建数据源表、同步任务表和加密密钥表
+    /// 创建数据源表、同步任务表、任务单元进度表和加密密钥表
     pub async fn init_schema(&self) -> Result<()> {
         // 创建数据源表
         sqlx::query(
@@ -92,6 +97,124 @@ impl Storage {
         .await
         .context("创建同步任务表失败")?;
 
+        // ==================== 三表结构 ====================
+        
+        // 1. 任务单元配置表
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS task_unit_config (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                unit_name TEXT NOT NULL,
+                unit_type TEXT NOT NULL CHECK(unit_type IN ('table', 'index')),
+                search_pattern TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(task_id, unit_name),
+                FOREIGN KEY (task_id) REFERENCES sync_tasks(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建任务单元配置表失败")?;
+        
+        // 2. 任务单元运行记录表
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS task_unit_runtime (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                unit_name TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'failed')),
+                total_records INTEGER DEFAULT 0,
+                processed_records INTEGER DEFAULT 0,
+                error_message TEXT,
+                started_at INTEGER,
+                updated_at INTEGER NOT NULL,
+                last_processed_batch INTEGER,
+                UNIQUE(task_id, unit_name),
+                FOREIGN KEY (task_id) REFERENCES sync_tasks(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建任务单元运行记录表失败")?;
+        
+        // 3. 任务单元历史记录表
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS task_unit_history (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                unit_name TEXT NOT NULL,
+                search_pattern TEXT,
+                total_records INTEGER DEFAULT 0,
+                completed_at INTEGER NOT NULL,
+                duration INTEGER NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES sync_tasks(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建任务单元历史记录表失败")?;
+        
+        // 执行数据库迁移
+        self.migrate_schema().await?;
+
+        // ==================== 索引 ====================
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_unit_config_task_id 
+            ON task_unit_config(task_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建配置表任务索引失败")?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_unit_runtime_task_id 
+            ON task_unit_runtime(task_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建运行记录表任务索引失败")?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_unit_runtime_status 
+            ON task_unit_runtime(status)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建运行记录表状态索引失败")?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_unit_history_task_id 
+            ON task_unit_history(task_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建历史记录表任务索引失败")?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_unit_history_pattern 
+            ON task_unit_history(task_id, search_pattern)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("创建历史记录表搜索模式索引失败")?;
+
         // 创建加密密钥表
         sqlx::query(
             r#"
@@ -106,6 +229,40 @@ impl Storage {
         .await
         .context("创建加密密钥表失败")?;
 
+        Ok(())
+    }
+    
+    /// 数据库迁移
+    /// 
+    /// 为现有数据库添加新字段
+    async fn migrate_schema(&self) -> Result<()> {
+        // 检查 task_unit_runtime 表的 last_processed_batch 列是否存在
+        let batch_column_exists: bool = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) > 0
+            FROM pragma_table_info('task_unit_runtime')
+            WHERE name = 'last_processed_batch'
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false);
+        
+        if !batch_column_exists {
+            log::info!("执行数据库迁移: 添加 last_processed_batch 列");
+            sqlx::query(
+                r#"
+                ALTER TABLE task_unit_runtime 
+                ADD COLUMN last_processed_batch INTEGER
+                "#
+            )
+            .execute(&self.pool)
+            .await
+            .context("添加 last_processed_batch 列失败")?;
+            
+            log::info!("数据库迁移完成: last_processed_batch");
+        }
+        
         Ok(())
     }
 }

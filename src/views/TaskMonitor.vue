@@ -28,12 +28,14 @@
           :loading="taskMonitorStore.loading"
           :speed="progress?.speed.toFixed(2) || '0'"
           :estimated-time="formatTime(progress?.estimatedTime || 0)"
+          :processed-records="processedRecordsFormatted"
+          :total-progress="totalProgressFormatted"
           @start="handleStart"
           @pause="handlePause"
           @resume="handleResume"
         />
 
-        <!-- 下方分栏区 -->
+        <!-- 同步进度区 -->
         <div class="task-data-section">
           <!-- 左侧：同步进度 -->
           <ProgressPanel
@@ -46,10 +48,6 @@
             :detail-logs="detailLogs"
             :verify-logs="verifyLogs"
             :errors="taskMonitorStore.errors"
-            @update:all-log-ref="(ref) => allLogContentRef = ref || undefined"
-            @update:detail-log-ref="(ref) => detailLogContentRef = ref || undefined"
-            @update:verify-log-ref="(ref) => verifyLogContentRef = ref || undefined"
-            @update:error-log-ref="(ref) => errorLogContentRef = ref || undefined"
           />
         </div>
       </div>
@@ -65,6 +63,7 @@ import TaskList from './TaskMonitor/components/TaskList.vue'
 import TaskControl from './TaskMonitor/components/TaskControl.vue'
 import ProgressPanel from './TaskMonitor/components/ProgressPanel.vue'
 import LogPanel from './TaskMonitor/components/LogPanel.vue'
+
 import { useTaskMonitor } from './TaskMonitor/composables/useTaskMonitor'
 
 const route = useRoute()
@@ -72,16 +71,14 @@ const route = useRoute()
 const {
   selectedTaskId,
   allLogs,
-  allLogContentRef,
-  detailLogContentRef,
-  verifyLogContentRef,
-  errorLogContentRef,
   progress,
   detailLogs,
   verifyLogs,
   sortedTaskUnits,
   isRunning,
   isPaused,
+  processedRecordsFormatted,
+  totalProgressFormatted,
   syncTaskStore,
   taskMonitorStore,
   getSelectedSourceDataSource,
@@ -106,7 +103,7 @@ watch(() => route.query.taskId, (newTaskId) => {
   if (newTaskId && typeof newTaskId === 'string') {
     handleTaskSelect(newTaskId)
   }
-})
+}, { immediate: false })
 
 onUnmounted(() => {
   cleanup()
