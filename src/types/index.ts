@@ -1,153 +1,48 @@
-/**
- * 数据同步工具 - TypeScript 类型定义
- */
+// 通用响应
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+}
 
-// ==================== 数据源相关类型 ====================
-
-/**
- * 数据源类型
- */
+// 数据源类型
 export type DataSourceType = 'mysql' | 'elasticsearch';
 
-/**
- * 任务类型（数据源组合）
- */
-export type SyncTaskType = 'mysql-mysql' | 'mysql-es' | 'es-mysql' | 'es-es' | 'mysql-elasticsearch' | 'elasticsearch-mysql' | 'elasticsearch-elasticsearch';
-
-/**
- * 数据源接口
- */
+// 数据源
 export interface DataSource {
   id: string;
+  name: string;
+  type: DataSourceType; // 对应后端 #[serde(rename = "type")]
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  database?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDataSourceRequest {
   name: string;
   type: DataSourceType;
   host: string;
   port: number;
   username: string;
-  password: string; // 加密存储
-  database?: string; // MySQL 专用
-  createdAt: number; // 毫秒时间戳
-  updatedAt: number; // 毫秒时间戳
+  password?: string;
+  database?: string;
 }
 
-/**
- * 连接测试结果
- */
-export interface ConnectionResult {
-  success: boolean;
-  message: string;
-  details?: string;
-  steps?: ConnectionTestStep[]; // 测试步骤详情
-}
-
-/**
- * 连接测试步骤
- */
-export interface ConnectionTestStep {
-  step: number;
-  name: string;
-  success: boolean;
-  message: string;
-  duration?: number; // 耗时（毫秒）
-}
-
-/**
- * 批量测试单个数据源的结果
- */
-export interface BatchTestDataSourceResult {
-  dataSourceId: string;
-  dataSourceName: string;
-  steps: ConnectionTestStep[];
-  success: boolean;
-}
-
-/**
- * 批量测试结果
- */
-export interface BatchTestResult {
-  total: number;
-  success: number;
-  failed: number;
-  results: BatchTestDataSourceResult[];
-}
-
-// ==================== 同步任务相关类型 ====================
-
-/**
- * 任务状态
- */
+// 任务状态
 export type TaskStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
-/**
- * 错误处理策略
- */
-export type ErrorStrategy = 'skip' | 'pause';
+// 任务单元状态
+export type TaskUnitStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-/**
- * 数据库选择配置
- */
-export interface DatabaseSelection {
-  database: string;
-  tables: string[]; // 选中的表
-}
-
-/**
- * 索引选择配置
- */
-export interface IndexSelection {
-  pattern: string; // 索引名或通配符 (如 logs-*)
-  matchedIndices?: string[]; // 匹配到的索引
-}
-
-/**
- * ES 搜索条件组
- */
-export interface ESSearchGroup {
-  pattern: string;           // 搜索条件
-  matchedIndices: string[];  // 匹配的索引（所有过滤出来的）
-  selectedIndices?: string[]; // 用户选中的索引（用于编辑时恢复状态）
-  loading?: boolean;         // 加载状态
-}
-
-/**
- * 索引名称转换配置
- */
-export interface IndexNameTransform {
-  enabled: boolean;
-  mode: 'prefix' | 'suffix';
-  sourcePattern: string;
-  targetPattern: string;
-}
-
-/**
- * 数据库名称转换配置
- */
-export interface DbNameTransform {
-  enabled: boolean;
-  mode: 'prefix' | 'suffix';
-  sourcePattern: string;
-  targetPattern: string;
-}
-
-/**
- * 目标表存在时的处理策略（与后端保持一致）
- */
-export type TableExistsStrategy = 'drop' | 'truncate' | 'backup';
-
-/**
- * 同步配置
- */
-export interface SyncConfig {
-  threadCount: number; // 1-32
-  batchSize: number;
-  errorStrategy: ErrorStrategy;
-  tableExistsStrategy: TableExistsStrategy;
-  dbNameTransform?: DbNameTransform;
-}
-
-/**
- * 同步任务接口
- */
+// 同步任务
 export interface SyncTask {
   id: string;
   name: string;
@@ -155,140 +50,63 @@ export interface SyncTask {
   targetId: string;
   sourceType: DataSourceType;
   targetType: DataSourceType;
-  
-  // MySQL 配置
-  mysqlConfig?: {
-    databases: DatabaseSelection[];
-  };
-  
-  // ES 配置
-  esConfig?: {
-    searchGroups?: ESSearchGroup[];  // 搜索条件组（新方案）
-    selectedIndices?: string[];      // 最终选择的索引（新方案）
-    indices?: IndexSelection[];      // 旧方案，保持兼容
-    indexNameTransform?: IndexNameTransform; // 索引名称转换
-  };
-  
-  // 同步配置
-  syncConfig: SyncConfig;
-  
+  config: string; // JSON 字符串
   status: TaskStatus;
-  createdAt: number; // 毫秒时间戳
-  updatedAt: number; // 毫秒时间戳
+  createdAt: string;
+  updatedAt: string;
 }
 
-/**
- * 索引匹配结果
- */
-export interface IndexMatchResult {
-  pattern: string;
-  count: number;
-  preview: string[]; // 前 10 个
-}
-
-/**
- * 索引列表结果（支持分页）
- */
-export interface IndexListResult {
-  total: number;        // 总数
-  page: number;         // 当前页（从 1 开始）
-  pageSize: number;     // 每页大小
-  totalPages: number;   // 总页数
-  indices: string[];    // 当前页的索引列表
-}
-
-// ==================== 任务监控相关类型 ====================
-
-/**
- * 表同步状态
- */
-export type TableStatus = 'waiting' | 'running' | 'completed' | 'failed';
-
-/**
- * 表进度
- */
-export interface TableProgress {
-  tableName: string;
-  status: TableStatus;
-  totalRecords: number;
-  processedRecords: number;
-  percentage: number;
-}
-
-/**
- * 日志级别
- */
-export type LogLevel = 'info' | 'warn' | 'error';
-
-/**
- * 日志条目
- */
-export interface LogEntry {
-  timestamp: string;
-  level: LogLevel;
-  message: string;
-}
-
-/**
- * 任务单元状态
- */
-export type TaskUnitStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused';
-
-/**
- * 任务单元类型
- */
-export type TaskUnitType = 'table' | 'index';
-
-/**
- * 任务单元（表/索引）
- */
+// 任务单元
 export interface TaskUnit {
   id: string;
-  name: string;
-  status: TaskUnitStatus;
-  percentage: number;
-  processedRecords: number;
+  taskId: string;
+  unitName: string;
+  unitType: 'table' | 'index';
+  status: string;
   totalRecords: number;
+  processedRecords: number;
   errorMessage?: string;
-  searchPattern?: string; // 搜索关键字（用于按关键字清除记录）
+  createdAt: string;
+  updatedAt: string;
+  // 前端计算字段
+  percentage?: number;
 }
 
-/**
- * 任务单元状态统计
- */
-export interface TaskUnitStatistics {
-  total: number;
-  pending: number;
-  running: number;
-  completed: number;
-  failed: number;
-  paused: number;
-}
-
-/**
- * 任务进度
- */
-export interface TaskProgress {
+// 任务进度事件
+export interface TaskProgressEvent {
   taskId: string;
   status: TaskStatus;
   totalRecords: number;
   processedRecords: number;
   percentage: number;
-  speed: number; // 记录/秒
-  estimatedTime: number; // 秒
-  startTime: string;
-  currentTable?: string; // 当前处理的表/索引
-  tableProgress?: TableProgress[]; // 表进度列表
-  taskUnits?: TaskUnit[]; // 任务单元列表（新）
-  statistics?: TaskUnitStatistics; // 状态统计（新）
+  speed: number;
+  estimatedTime: number;
+  taskUnits: TaskUnit[];
 }
 
-/**
- * 错误日志
- */
-export interface ErrorLog {
+// 日志类别
+export type LogCategory = 'realtime' | 'summary' | 'verify' | 'error';
+export type LogLevel = 'info' | 'warn' | 'error';
+
+// 日志分条
+export interface LogEntry {
   timestamp: string;
-  errorType: string;
+  level: LogLevel;
+  category: LogCategory;
   message: string;
-  data?: any;
+}
+
+// 任务配置 (解析后的 config 字段)
+export interface SyncConfig {
+  batchSize: number;
+  threadCount: number;
+  errorStrategy: 'skip' | 'pause';
+  tableExistsStrategy: 'drop' | 'truncate' | 'backup';
+  selection?: string[]; // 选择的表或索引
+  dbNameTransform?: {
+    enabled: boolean;
+    mode: 'prefix' | 'suffix';
+    sourcePattern: string;
+    targetPattern: string;
+  };
 }

@@ -1,7 +1,5 @@
-/**
- * Stores 统一导出
- */
+import { createPinia } from 'pinia';
 
-export { useDataSourceStore } from './dataSource';
-export { useSyncTaskStore } from './syncTask';
-export { useTaskMonitorStore } from './taskMonitor';
+const pinia = createPinia();
+
+export default pinia;

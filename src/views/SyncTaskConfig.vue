@@ -1,358 +1,303 @@
 <template>
-  <div class="sync-task-config">
-    <n-space vertical :size="16">
-      <!-- 操作栏 -->
-      <n-space justify="space-between">
-        <n-button type="primary" @click="handleAdd">
+  <div class="page-container">
+    <div class="header-actions">
+      <n-space>
+        <n-radio-group v-model:value="viewMode" size="medium">
+          <n-radio-button value="card">
+            <n-icon><GridIcon /></n-icon>
+          </n-radio-button>
+          <n-radio-button value="list">
+            <n-icon><ListIcon /></n-icon>
+          </n-radio-button>
+        </n-radio-group>
+        <n-button type="primary" @click="handleCreate">
           <template #icon>
             <n-icon><AddIcon /></n-icon>
           </template>
           创建任务
         </n-button>
-        <n-button @click="loadTasks">
-          <template #icon>
-            <n-icon><RefreshIcon /></n-icon>
-          </template>
-          刷新
-        </n-button>
       </n-space>
+    </div>
 
-      <!-- 任务列表 -->
-      <n-data-table
-        :columns="columns"
-        :data="syncTaskStore.tasks"
-        :loading="syncTaskStore.loading"
-        :pagination="pagination"
-        :bordered="false"
-      />
-    </n-space>
+    <!-- 卡片视图 -->
+    <n-grid v-if="viewMode === 'card'" :cols="3" :x-gap="16" :y-gap="16">
+      <n-grid-item v-for="item in tasks" :key="item.id">
+        <n-card 
+          :title="item.name" 
+          hoverable 
+          class="task-card"
+          @click="handleEdit(item)"
+        >
+          <template #header-extra>
+            <n-tag :type="getStatusType(item.status)" size="small">
+              {{ getStatusText(item.status) }}
+            </n-tag>
+          </template>
+          
+          <div class="card-content">
+            <div class="sync-direction">
+              <n-tag type="info" size="small" round>{{ item.sourceType.toUpperCase() }}</n-tag>
+              <n-icon size="18"><ArrowIcon /></n-icon>
+              <n-tag type="warning" size="small" round>{{ item.targetType.toUpperCase() }}</n-tag>
+            </div>
+            <div class="info-item">
+              <n-icon><TimeIcon /></n-icon>
+              <n-text depth="3">创建于 {{ formatDate(item.createdAt) }}</n-text>
+            </div>
+          </div>
 
-    <!-- 任务创建/编辑向导 -->
-    <SyncTaskWizard
-      v-model="showModal"
-      :is-edit="isEdit"
-      :form-data="formData"
-      @submit="handleSubmit"
-      @create="handleCreate"
+          <template #action>
+            <div class="card-actions" @click.stop>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button size="small" quaternary @click="handleMonitor(item)">
+                    <template #icon><n-icon><MonitorIcon /></n-icon></template>
+                  </n-button>
+                </template>
+                任务监控
+              </n-tooltip>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button size="small" quaternary @click="handleEdit(item)">
+                    <template #icon><n-icon><EditIcon /></n-icon></template>
+                  </n-button>
+                </template>
+                编辑任务
+              </n-tooltip>
+              <n-popconfirm @positive-click="handleDelete(item.id)">
+                <template #trigger>
+                  <n-button size="small" quaternary type="error" @click.stop>
+                    <template #icon><n-icon><TrashIcon /></n-icon></template>
+                  </n-button>
+                </template>
+                确定要删除该任务吗？
+              </n-popconfirm>
+            </div>
+          </template>
+        </n-card>
+      </n-grid-item>
+    </n-grid>
+
+    <!-- 列表视图 -->
+    <n-data-table
+      v-else
+      :columns="columns"
+      :data="tasks"
+      :loading="loading"
+      :pagination="pagination"
+      :bordered="false"
+      @row-click="handleEdit"
+      class="task-table"
     />
 
-    <!-- 删除确认对话框 -->
-    <n-modal
-      v-model:show="showDeleteModal"
-      preset="dialog"
-      title="确认删除"
-      content="确定要删除这个任务吗？此操作不可恢复。"
-      positive-text="删除"
-      negative-text="取消"
-      @positive-click="confirmDelete"
+    <!-- 任务配置向导 -->
+    <SyncTaskWizard
+      v-if="showWizard"
+      :task-id="editingTaskId"
+      @close="showWizard = false"
+      @success="handleWizardSuccess"
+      @created="loadTasks"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import {
-  NSpace,
-  NButton,
-  NDataTable,
-  NModal,
-  NIcon,
-  NTag,
-  type DataTableColumns
-} from 'naive-ui'
-import {
-  Add as AddIcon,
-  Refresh as RefreshIcon,
+import { ref, onMounted, h } from 'vue';
+import { useRouter } from 'vue-router';
+import { 
+  NButton, NDataTable, NIcon, NTag, NSpace, NPopconfirm, 
+  NGrid, NGridItem, NCard, NText, NRadioGroup, NRadioButton, NTooltip 
+} from 'naive-ui';
+import { 
+  Add as AddIcon, 
+  Grid as GridIcon,
+  List as ListIcon,
+  Sync as ArrowIcon,
+  Time as TimeIcon,
+  StatsChart as MonitorIcon,
   Create as EditIcon,
-  Trash as DeleteIcon
-} from '@vicons/ionicons5'
-import { useDataSourceStore } from '../stores/dataSource'
-import { useSyncTaskStore } from '../stores/syncTask'
-import { showSuccess, handleApiError } from '../utils/message'
-import SyncTaskWizard from '../components/SyncTaskWizard/index.vue'
-import type { SyncTask } from '../types'
+  Trash as TrashIcon
+} from '@vicons/ionicons5';
+import { taskApi } from '../api/task';
+import type { SyncTask } from '../types';
+import { showSuccess, showError } from '../utils/message';
+import { formatDate } from '../utils/format';
+import SyncTaskWizard from '../components/SyncTaskWizard/index.vue';
 
-const dataSourceStore = useDataSourceStore()
-const syncTaskStore = useSyncTaskStore()
-const router = useRouter()
+const tasks = ref<SyncTask[]>([]);
+const viewMode = ref<'card' | 'list'>('card');
+const loading = ref(false);
+const showWizard = ref(false);
+const editingTaskId = ref<string | undefined>();
+const router = useRouter();
 
-// 表格配置
-const pagination = { pageSize: 10 }
+const pagination = {
+  pageSize: 10
+};
 
-// 表格列定义
-const columns: DataTableColumns<SyncTask> = [
-  { title: '任务名称', key: 'name', width: 150 },
-  {
-    title: '源类型',
-    key: 'sourceType',
-    width: 120,
-    render: (row) => h(
-      NTag,
-      { type: row.sourceType === 'mysql' ? 'info' : 'success' },
-      { default: () => row.sourceType === 'mysql' ? 'MySQL' : 'Elasticsearch' }
-    )
-  },
-  {
-    title: '目标类型',
-    key: 'targetType',
-    width: 120,
-    render: (row) => h(
-      NTag,
-      { type: row.targetType === 'mysql' ? 'info' : 'success' },
-      { default: () => row.targetType === 'mysql' ? 'MySQL' : 'Elasticsearch' }
-    )
-  },
-  {
-    title: '状态',
-    key: 'status',
-    width: 100,
-    render: (row) => {
-      const statusMap: Record<string, { type: any; label: string }> = {
-        idle: { type: 'default', label: '空闲' },
-        running: { type: 'info', label: '运行中' },
-        paused: { type: 'warning', label: '已暂停' },
-        completed: { type: 'success', label: '已完成' },
-        failed: { type: 'error', label: '失败' }
-      }
-      const status = statusMap[row.status] || statusMap.idle
-      return h(NTag, { type: status.type }, { default: () => status.label })
+const getStatusType = (status: string): any => {
+  const typeMap: Record<string, string> = {
+    idle: 'default',
+    running: 'primary',
+    paused: 'warning',
+    completed: 'success',
+    failed: 'error'
+  };
+  return typeMap[status] || 'default';
+};
+
+const getStatusText = (status: string): string => {
+  const textMap: Record<string, string> = {
+    idle: '待机',
+    running: '运行中',
+    paused: '已暂停',
+    completed: '已完成',
+    failed: '失败'
+  };
+  return textMap[status] || status;
+};
+
+const columns = [
+  { title: '任务名称', key: 'name' },
+  { 
+    title: '同步方向', 
+    key: 'direction',
+    render(row: SyncTask) {
+      return h(NSpace, null, {
+        default: () => [
+          h(NTag, { type: 'info', size: 'small' }, { default: () => row.sourceType.toUpperCase() }),
+          h(NIcon, { size: 16, style: 'vertical-align: middle' }, { default: () => h(ArrowIcon) }),
+          h(NTag, { type: 'warning', size: 'small' }, { default: () => row.targetType.toUpperCase() })
+        ]
+      });
     }
   },
-  {
-    title: '线程数',
-    key: 'syncConfig.threadCount',
-    width: 80,
-    render: (row) => row.syncConfig.threadCount
+  { 
+    title: '状态', 
+    key: 'status',
+    render(row: SyncTask) {
+      return h(NTag, { type: getStatusType(row.status) }, { default: () => getStatusText(row.status) });
+    }
   },
-  {
-    title: '批量大小',
-    key: 'syncConfig.batchSize',
-    width: 100,
-    render: (row) => row.syncConfig.batchSize
-  },
-  {
-    title: '创建时间',
+  { 
+    title: '创建时间', 
     key: 'createdAt',
-    width: 180,
-    render: (row) => new Date(row.createdAt).toLocaleString()
+    render: (row: SyncTask) => formatDate(row.createdAt)
   },
   {
     title: '操作',
     key: 'actions',
-    width: 180,
-    render: (row) => h(
-      NSpace,
-      {},
-      {
+    render(row: SyncTask) {
+      return h(NSpace, null, {
         default: () => [
-          h(
-            NButton,
-            { size: 'small', onClick: () => handleEditName(row) },
-            { default: () => '修改名称', icon: () => h(NIcon, null, { default: () => h(EditIcon) }) }
-          ),
-          h(
-            NButton,
-            { size: 'small', type: 'primary', onClick: () => handleConfigure(row) },
-            { default: () => '配置任务', icon: () => h(NIcon, null, { default: () => h(EditIcon) }) }
-          ),
-          h(
-            NButton,
-            { size: 'small', type: 'error', onClick: () => handleDelete(row) },
-            { default: () => '删除', icon: () => h(NIcon, null, { default: () => h(DeleteIcon) }) }
-          )
+          h(NButton, { size: 'small', quaternary: true, onClick: (e) => { e.stopPropagation(); handleMonitor(row); } }, { icon: () => h(MonitorIcon) }),
+          h(NButton, { size: 'small', quaternary: true, onClick: (e) => { e.stopPropagation(); handleEdit(row); } }, { icon: () => h(EditIcon) }),
+          h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
+            trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: (e) => e.stopPropagation() }, { icon: () => h(TrashIcon) }),
+            default: () => '确定要删除该任务吗？'
+          })
         ]
-      }
-    )
-  }
-]
-
-// 表单相关
-const showModal = ref(false)
-const isEdit = ref(false)
-const formData = ref<Partial<SyncTask> & { targetDatabase?: string }>({
-  name: '',
-  sourceId: '',
-  targetId: '',
-  sourceType: 'mysql',
-  targetType: 'mysql',
-  targetDatabase: '',
-  mysqlConfig: { databases: [] },
-  esConfig: { indices: [] },
-  syncConfig: {
-    threadCount: 4,
-    batchSize: 2500,
-    errorStrategy: 'skip',
-    tableExistsStrategy: 'drop',
-    dbNameTransform: {
-      enabled: false,
-      mode: 'prefix',
-      sourcePattern: '',
-      targetPattern: ''
-    }
-  },
-  status: 'idle'
-})
-
-// 删除相关
-const showDeleteModal = ref(false)
-const deleteTarget = ref<SyncTask | null>(null)
-
-// 方法
-function handleAdd() {
-  isEdit.value = false
-  formData.value = {
-    name: '',
-    sourceId: '',
-    targetId: '',
-    sourceType: 'mysql',
-    targetType: 'mysql',
-    targetDatabase: '',
-    mysqlConfig: { databases: [] },
-    esConfig: { indices: [] },
-    syncConfig: {
-      threadCount: 4,
-      batchSize: 2500,
-      errorStrategy: 'skip',
-      tableExistsStrategy: 'drop',
-      dbNameTransform: {
-        enabled: false,
-        mode: 'prefix',
-        sourcePattern: '',
-        targetPattern: ''
-      }
-    },
-    status: 'idle'
-  }
-  showModal.value = true
-}
-
-// 修改任务名称（只修改名称，不进入配置步骤）
-async function handleEditName(row: SyncTask) {
-  const newName = prompt('请输入新的任务名称：', row.name)
-  if (newName && newName.trim() && newName !== row.name) {
-    try {
-      await syncTaskStore.updateTask(row.id, { ...row, name: newName.trim() })
-      showSuccess('任务名称修改成功')
-      await loadTasks()
-    } catch (error) {
-      handleApiError(error, '修改任务名称失败')
+      });
     }
   }
-}
-
-// 配置任务（进入完整配置步骤）
-function handleConfigure(row: SyncTask) {
-  isEdit.value = true
-  formData.value = { ...row }
-  showModal.value = true
-}
-
-async function handleCreate(data: { name: string; sourceType: any; targetType: any }) {
-  try {
-    // 前置配置完成，创建任务记录（只保存名称和类型）
-    await syncTaskStore.createTask({
-      name: data.name,
-      sourceId: '', // 暂时为空，后续步骤中填写
-      targetId: '', // 暂时为空，后续步骤中填写
-      sourceType: data.sourceType,
-      targetType: data.targetType,
-      mysqlConfig: { databases: [] },
-      esConfig: { indices: [] },
-      syncConfig: {
-        threadCount: 4,
-        batchSize: 2500,
-        errorStrategy: 'skip',
-        tableExistsStrategy: 'drop'
-      },
-      status: 'idle'
-    })
-    
-    showSuccess('任务创建成功，请在列表中点击"编辑"按钮进行配置')
-    
-    // 关闭对话框
-    showModal.value = false
-    
-    // 刷新任务列表
-    await loadTasks()
-  } catch (error) {
-    handleApiError(error, '创建任务失败')
-  }
-}
-
-async function handleSubmit(data: Partial<SyncTask>) {
-  try {
-    let taskId: string
-    
-    if (data.id) {
-      // 更新现有任务配置
-      await syncTaskStore.updateTask(data.id, data as SyncTask)
-      taskId = data.id
-      showSuccess('任务配置保存成功，正在跳转到任务监控...')
-    } else {
-      // 创建新任务（完整配置）
-      const newTask = {
-        ...data,
-        status: 'idle' as const
-      } as Omit<SyncTask, 'id' | 'createdAt' | 'updatedAt'>
-      
-      taskId = await syncTaskStore.createTask(newTask)
-      showSuccess('任务创建成功，正在跳转到任务监控...')
-    }
-    
-    showModal.value = false
-    await loadTasks()
-    
-    // 跳转到任务监控页面
-    setTimeout(() => {
-      router.push({
-        path: '/monitor',
-        query: { taskId }
-      })
-    }, 500)
-  } catch (error) {
-    console.error('SyncTaskConfig.handleSubmit - 错误:', error)
-    handleApiError(error, '保存任务失败')
-  }
-}
-
-function handleDelete(row: SyncTask) {
-  deleteTarget.value = row
-  showDeleteModal.value = true
-}
-
-async function confirmDelete() {
-  if (!deleteTarget.value) return
-  
-  try {
-    await syncTaskStore.deleteTask(deleteTarget.value.id)
-    showSuccess('任务删除成功')
-    await loadTasks()
-  } catch (error) {
-    handleApiError(error, '删除任务失败')
-  } finally {
-    deleteTarget.value = null
-  }
-}
+];
 
 async function loadTasks() {
+  loading.value = true;
   try {
-    await syncTaskStore.fetchTasks()
-  } catch (error) {
-    handleApiError(error, '加载任务列表失败')
+    tasks.value = await taskApi.list();
+  } catch (e: any) {
+    showError('加载任务列表失败: ' + e);
+  } finally {
+    loading.value = false;
   }
 }
 
-onMounted(async () => {
-  await dataSourceStore.fetchDataSources()
-  await loadTasks()
-})
+function handleCreate() {
+  editingTaskId.value = undefined;
+  showWizard.value = true;
+}
+
+function handleEdit(task: SyncTask) {
+  editingTaskId.value = task.id;
+  showWizard.value = true;
+}
+
+function handleMonitor(task: SyncTask) {
+  router.push({ name: 'TaskMonitor', query: { taskId: task.id } });
+}
+
+async function handleDelete(id: string) {
+  try {
+    await taskApi.delete(id);
+    showSuccess('删除成功');
+    loadTasks();
+  } catch (e: any) {
+    showError('删除失败: ' + e);
+  }
+}
+
+function handleWizardSuccess() {
+  showWizard.value = false;
+  loadTasks();
+}
+
+onMounted(loadTasks);
 </script>
 
 <style scoped>
-.sync-task-config {
-  height: 100%;
-  padding: 24px;
-  box-sizing: border-box;
+.page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.header-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-card {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.task-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.card-content {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sync-direction {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  padding: 8px;
+  background: #f5f7f9;
+  border-radius: 8px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-table :deep(.n-data-table-tr) {
+  cursor: pointer;
 }
 </style>

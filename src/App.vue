@@ -1,38 +1,43 @@
 <template>
-  <n-config-provider :theme="theme">
+  <n-config-provider :theme="null">
     <n-message-provider>
-      <n-notification-provider>
+      <MessageContainer />
+      <n-dialog-provider>
         <Layout />
-      </n-notification-provider>
+      </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NConfigProvider, NMessageProvider, NNotificationProvider } from 'naive-ui'
-import Layout from './components/Layout.vue'
+import { defineComponent, h } from 'vue';
+import { NConfigProvider, NMessageProvider, NDialogProvider, useMessage } from 'naive-ui';
+import Layout from './components/Layout.vue';
+import { setupMessage } from './utils/message';
 
-const theme = ref(null)
+// 消息容器组件，用于获取 message 实例并设置到工具类中
+const MessageContainer = defineComponent({
+  setup() {
+    const message = useMessage();
+    setupMessage(message);
+    return () => h('div');
+  }
+});
 </script>
 
 <style>
+:root {
+  --color-primary: #18a058;
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-html, body, #app {
-  margin: 0;
-  padding: 0;
-  height: 100vh;
-  overflow: hidden;
-}
-
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: v-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #f5f7f9;
 }
 </style>

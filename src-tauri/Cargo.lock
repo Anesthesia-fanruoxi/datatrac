@@ -140,6 +140,7 @@ dependencies = [
  "dirs 5.0.1",
  "elasticsearch",
  "futures",
+ "hex",
  "libsqlite3-sys",
  "log",
  "rand 0.8.5",

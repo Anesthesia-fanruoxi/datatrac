@@ -1,95 +1,80 @@
 <template>
   <n-modal
-    v-model:show="visible"
-    :title="title"
+    v-model:show="show"
     preset="card"
-    style="width: 500px"
+    :title="title"
+    style="width: 400px"
+    @after-leave="$emit('update:modelValue', false)"
   >
-    <n-space vertical :size="16">
-      <n-card
-        v-for="type in dataSourceTypes"
-        :key="type.value"
-        :class="['type-card', { selected: selectedType === type.value }]"
-        hoverable
-        @click="selectType(type.value)"
-      >
-        <div class="card-content">
-          <n-icon :size="48" :color="type.color">
-            <component :is="type.icon" />
-          </n-icon>
-          <div style="margin-left: 16px">
-            <h4 style="margin: 0 0 4px">{{ type.label }}</h4>
-            <n-text depth="3" style="font-size: 13px">{{ type.description }}</n-text>
+    <n-grid :cols="2" :x-gap="12" :y-gap="12">
+      <n-grid-item v-for="option in options" :key="option.value">
+        <n-card 
+          hoverable 
+          class="type-card" 
+          :class="{ active: selectedType === option.value }"
+          @click="handleSelect(option.value)"
+        >
+          <div class="type-content">
+            <n-icon size="32" :color="option.color">
+              <component :is="option.icon" />
+            </n-icon>
+            <span class="type-label">{{ option.label }}</span>
           </div>
-        </div>
-      </n-card>
-    </n-space>
+        </n-card>
+      </n-grid-item>
+    </n-grid>
   </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NModal, NSpace, NCard, NIcon, NText } from 'naive-ui'
-import { Server as ServerIcon, Cloud as CloudIcon } from '@vicons/ionicons5'
-import type { DataSourceType } from '../../types'
+import { ref, watch } from 'vue';
+import { NModal, NGrid, NGridItem, NCard, NIcon } from 'naive-ui';
+import { Server, Cloud } from '@vicons/ionicons5';
+import type { DataSourceType } from '../../types';
 
 const props = defineProps<{
-  modelValue: boolean
-  title: string
-  selectedType?: DataSourceType
-}>()
+  modelValue: boolean;
+  title: string;
+  selectedType?: DataSourceType;
+}>();
 
-const emit = defineEmits<{
-  'update:modelValue': [value: boolean]
-  'select': [type: DataSourceType]
-}>()
+const emit = defineEmits(['update:modelValue', 'select']);
 
-const visible = computed({
-  get: () => props.modelValue,
-  set: (val) => emit('update:modelValue', val)
-})
+const show = ref(props.modelValue);
 
-const dataSourceTypes = [
-  {
-    value: 'mysql' as DataSourceType,
-    label: 'MySQL',
-    description: 'MySQL 数据库',
-    icon: ServerIcon,
-    color: '#18a058'
-  },
-  {
-    value: 'elasticsearch' as DataSourceType,
-    label: 'Elasticsearch',
-    description: 'Elasticsearch 搜索引擎',
-    icon: CloudIcon,
-    color: '#2080f0'
-  }
-]
+watch(() => props.modelValue, (val) => {
+  show.value = val;
+});
 
-function selectType(type: DataSourceType) {
-  emit('select', type)
-  visible.value = false
+const options = [
+  { label: 'MySQL', value: 'mysql' as DataSourceType, icon: Server, color: '#2080f0' },
+  { label: 'Elasticsearch', value: 'elasticsearch' as DataSourceType, icon: Cloud, color: '#18a058' }
+];
+
+function handleSelect(type: DataSourceType) {
+  emit('select', type);
+  emit('update:modelValue', false);
 }
 </script>
 
 <style scoped>
 .type-card {
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
 }
-
-.type-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+.type-card.active {
+  border-color: var(--color-primary);
+  background-color: rgba(24, 160, 88, 0.05);
 }
-
-.type-card.selected {
-  border: 2px solid #18a058;
-}
-
-.card-content {
+.type-content {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 8px;
+  gap: 12px;
+  padding: 8px 0;
+}
+.type-label {
+  font-weight: bold;
 }
 </style>

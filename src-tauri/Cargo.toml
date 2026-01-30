@@ -46,4 +46,5 @@ anyhow = "1.0"
 thiserror = "1.0"
 regex = "1.10"
 futures = "0.3.31"
+hex = "0.4"
 
