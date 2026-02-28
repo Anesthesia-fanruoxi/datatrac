@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataTrace - 数据同步系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- 左侧菜单 -->
+    <div class="sidebar">
+        <div class="logo">
+            <h5><i class="bi bi-arrow-left-right"></i> DataTrace</h5>
+        </div>
+        <ul class="menu">
+            <li><a href="#datasource" onclick="showTab('datasource')" id="tab-datasource" class="active">
+                <i class="bi bi-database"></i> 数据源配置
+            </a></li>
+            <li><a href="#task-config" onclick="showTab('task-config')" id="tab-task-config">
+                <i class="bi bi-gear"></i> 任务配置
+            </a></li>
+            <li><a href="#task-manage" onclick="showTab('task-manage')" id="tab-task-manage">
+                <i class="bi bi-activity"></i> 任务执行监控
+            </a></li>
+        </ul>
+    </div>
+
+    <!-- Toast 通知容器 -->
+    <div class="toast-container"></div>
+
+    <!-- 新建任务模态框 -->
+    <div id="createTaskModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1000; backdrop-filter: blur(5px);">
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:0; border-radius:15px; width:500px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px 15px 0 0;">
+                <h5 style="color: white; margin: 0;"><i class="bi bi-plus-circle me-2"></i>新建同步任务</h5>
+            </div>
+            <div style="padding: 30px;">
+                <form id="createTaskForm">
+                    <div class="mb-3">
+                        <label class="form-label">任务名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="taskName" placeholder="例如: 生产环境数据同步" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">源类型 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="taskSourceType" required>
+                            <option value="">请选择</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="elasticsearch">Elasticsearch</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">目标类型 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="taskTargetType" required>
+                            <option value="">请选择</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="elasticsearch">Elasticsearch</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" id="taskRemark" rows="3" placeholder="可选"></textarea>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        创建后将进入配置向导，引导您完成任务配置
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-secondary" onclick="closeCreateTaskModal()">取消</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> 创建并配置
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 配置向导模态框 - 占位符，由 task-wizard.js 动态创建 -->
+    <div id="configWizardModalPlaceholder"></div>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+        <!-- 数据源配置 -->
+        <div id="content-datasource" class="tab-content active">
+            <div class="content-card">
+                <h4><i class="bi bi-database"></i> 数据源配置</h4>
+                <hr>
+                <button class="btn btn-primary mb-3" onclick="showAddDataSource()">
+                    <i class="bi bi-plus-circle"></i> 新建数据源
+                </button>
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>类型</th>
+                            <th>地址</th>
+                            <th>连接状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="datasourceList">
+                        <tr><td colspan="5" class="text-center text-muted">暂无数据</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 任务配置 -->
+        <div id="content-task-config" class="tab-content" style="display:none;">
+            <div class="content-card">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4><i class="bi bi-gear"></i> 任务配置</h4>
+                    <button class="btn btn-primary" onclick="showCreateTaskModal()">
+                        <i class="bi bi-plus-circle"></i> 新建同步任务
+                    </button>
+                </div>
+                <hr>
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>任务名称</th>
+                            <th>同步方向</th>
+                            <th>状态</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="taskConfigList">
+                        <tr><td colspan="5" class="text-center text-muted">暂无任务</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 任务管理 -->
+        <div id="content-task-manage" class="tab-content" style="display:none;">
+            <div class="task-manage-container">
+                <!-- 左侧任务列表 -->
+                <div class="task-list-panel">
+                    <div class="task-list-header">
+                        <h5><i class="bi bi-list-task me-2"></i>任务执行监控</h5>
+                    </div>
+                    
+                    <!-- 全量同步分类 -->
+                    <div class="task-category">
+                        <div class="task-category-header expanded" onclick="toggleCategory('full')">
+                            <span><i class="bi bi-database me-2"></i>全量同步</span>
+                            <i class="bi bi-chevron-right"></i>
+                        </div>
+                        <div class="task-list expanded" id="fullTaskList">
+                            <div class="text-center text-muted p-3" style="font-size: 13px;">
+                                <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 增量同步分类 -->
+                    <div class="task-category">
+                        <div class="task-category-header expanded" onclick="toggleCategory('incremental')">
+                            <span><i class="bi bi-arrow-repeat me-2"></i>增量同步</span>
+                            <i class="bi bi-chevron-right"></i>
+                        </div>
+                        <div class="task-list expanded" id="incrementalTaskList">
+                            <div class="text-center text-muted p-3" style="font-size: 13px;">
+                                <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 右侧任务详情 -->
+                <div class="task-detail-panel">
+                    <div class="task-detail-header">
+                        <h5 id="taskDetailTitle"><i class="bi bi-info-circle me-2"></i>请选择任务</h5>
+                        
+                        <!-- 统计信息栏 - 与按钮在同一行 -->
+                        <div id="taskStats" style="display: none; flex: 1; margin: 0 20px;">
+                            <div style="display: flex; justify-content: space-around; align-items: center; gap: 15px;">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">同步速度</div>
+                                    <div style="font-size: 16px; font-weight: 600; color: white;" id="statSpeed">0.00</div>
+                                    <div style="font-size: 10px; color: rgba(255,255,255,0.6);">记录/秒</div>
+                                </div>
+                                <div style="width: 1px; height: 35px; background: rgba(255,255,255,0.2);"></div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">预计剩余</div>
+                                    <div style="font-size: 16px; font-weight: 600; color: white;" id="statRemaining">-</div>
+                                    <div style="font-size: 10px; color: rgba(255,255,255,0.6);">时间</div>
+                                </div>
+                                <div style="width: 1px; height: 35px; background: rgba(255,255,255,0.2);"></div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">已处理</div>
+                                    <div style="font-size: 16px; font-weight: 600; color: white;" id="statProcessed">0</div>
+                                    <div style="font-size: 10px; color: rgba(255,255,255,0.6);">条</div>
+                                </div>
+                                <div style="width: 1px; height: 35px; background: rgba(255,255,255,0.2);"></div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">总进度</div>
+                                    <div style="font-size: 16px; font-weight: 600; color: white;" id="statProgress">0.0%</div>
+                                    <div style="font-size: 10px; color: rgba(255,255,255,0.6);">完成度</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="taskActions" style="display: none;">
+                            <button class="btn btn-sm btn-light me-2" onclick="startTask()">
+                                <i class="bi bi-play-fill"></i> 启动
+                            </button>
+                            <button class="btn btn-sm btn-light me-2" onclick="pauseTask()">
+                                <i class="bi bi-pause-fill"></i> 暂停
+                            </button>
+                            <button class="btn btn-sm btn-light" onclick="stopTask()">
+                                <i class="bi bi-stop-fill"></i> 停止
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="task-detail-content">
+                        <!-- 左侧：同步进度 -->
+                        <div class="progress-panel">
+                            <div class="panel-header">
+                                <i class="bi bi-graph-up me-2"></i>同步进度
+                            </div>
+                            <div class="panel-body" id="progressContent">
+                                <div class="empty-state">
+                                    <i class="bi bi-inbox"></i>
+                                    <div>请选择任务查看进度</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 右侧：同步日志 -->
+                        <div class="log-panel">
+                            <div class="panel-header">
+                                <i class="bi bi-terminal me-2"></i>同步日志
+                                <div class="log-tabs">
+                                    <button class="log-tab active" data-tab="all" onclick="window.TaskManageUI.filterLogsByTab('all')">所有日志</button>
+                                    <button class="log-tab" data-tab="create" onclick="window.TaskManageUI.filterLogsByTab('create')">创建日志</button>
+                                    <button class="log-tab" data-tab="complete" onclick="window.TaskManageUI.filterLogsByTab('complete')">完成日志</button>
+                                </div>
+                            </div>
+                            <div class="panel-body" id="logContent">
+                                <div class="empty-state">
+                                    <i class="bi bi-inbox"></i>
+                                    <div>请选择任务查看日志</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建/编辑数据源模态框 -->
+    <div id="datasourceModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1000; backdrop-filter: blur(5px);">
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:0; border-radius:15px; width:500px; max-height:80vh; overflow-y:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px 15px 0 0;">
+                <h5 id="modalTitle" style="color: white; margin: 0;">新建数据源</h5>
+            </div>
+            <div style="padding: 30px;">
+                <form id="datasourceForm">
+                <input type="hidden" id="datasourceId">
+                
+                <div class="mb-3">
+                    <label class="form-label">名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="dsName" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">类型 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="dsType" required>
+                        <option value="">请选择</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="elasticsearch">Elasticsearch</option>
+                    </select>
+                </div>
+
+                <div class="row">
+                    <div class="col-8">
+                        <div class="mb-3">
+                            <label class="form-label">主机 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="dsHost" placeholder="localhost" required>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="mb-3">
+                            <label class="form-label">端口 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="dsPort" placeholder="3306" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="dsUsername" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">密码 <span class="text-danger">*</span></label>
+                    <input type="password" class="form-control" id="dsPassword" required>
+                </div>
+
+                <div class="mb-3" id="dbNameGroup" style="display:none;">
+                    <label class="form-label">数据库名称</label>
+                    <input type="text" class="form-control" id="dsDatabase">
+                    <div class="form-text">可选，留空表示不指定数据库</div>
+                </div>
+
+                    <div class="d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                        <button type="button" class="btn btn-info" onclick="testConnection()">
+                            <i class="bi bi-plug"></i> 测试连接
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> 保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/task.js"></script>
+    <!-- 任务监控模块 - 拆分为多个文件 -->
+    <script src="/static/js/task-manage/core.js"></script>
+    <script src="/static/js/task-manage/detail.js"></script>
+    <script src="/static/js/task-manage/control.js"></script>
+    <script src="/static/js/task-manage/ui.js"></script>
+    <!-- 任务配置向导 - 拆分为多个模块 -->
+    <script src="/static/js/task-wizard/core.js"></script>
+    <script src="/static/js/task-wizard/step1.js"></script>
+    <script src="/static/js/task-wizard/step2.js"></script>
+    <script src="/static/js/task-wizard/step3.js"></script>
+    <script src="/static/js/task-wizard/step4.js"></script>
+    <script src="/static/js/task-wizard/modals.js"></script>
+    <script src="/static/js/task-wizard-new.js"></script>
+    <script>
+        // Toast 通知函数
+        function showToast(message, type = 'success') {
+            const toastContainer = document.querySelector('.toast-container');
+            const toastId = 'toast-' + Date.now();
+            
+            const bgClass = {
+                'success': 'bg-success',
+                'error': 'bg-danger',
+                'warning': 'bg-warning',
+                'info': 'bg-info'
+            }[type] || 'bg-success';
+            
+            const icon = {
+                'success': 'check-circle-fill',
+                'error': 'exclamation-triangle-fill',
+                'warning': 'exclamation-circle-fill',
+                'info': 'info-circle-fill'
+            }[type] || 'check-circle-fill';
+            
+            const toastHtml = `
+                <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="bi bi-${icon} me-2"></i>${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+            
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toastElement = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastElement, { delay: 3000 });
+            toast.show();
+            
+            toastElement.addEventListener('hidden.bs.toast', function() {
+                toastElement.remove();
+            });
+        }
+
+        // 确认对话框（使用 Bootstrap Modal）
+        function showConfirm(message, onConfirm) {
+            const modalId = 'confirmModal-' + Date.now();
+            const modalHtml = `
+                <div class="modal fade" id="${modalId}" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-question-circle text-warning me-2"></i>确认操作</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">${message}</div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <button type="button" class="btn btn-primary" id="${modalId}-confirm">确定</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            const modalElement = document.getElementById(modalId);
+            const modal = new bootstrap.Modal(modalElement);
+            
+            document.getElementById(modalId + '-confirm').addEventListener('click', function() {
+                modal.hide();
+                onConfirm();
+            });
+            
+            modalElement.addEventListener('hidden.bs.modal', function() {
+                modalElement.remove();
+            });
+            
+            modal.show();
+        }
+
+        // 切换标签页
+        function showTab(tabName) {
+            console.log('切换到标签页:', tabName);
+            
+            // 隐藏所有内容
+            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+            // 移除所有菜单激活状态
+            document.querySelectorAll('.sidebar .menu a').forEach(el => el.classList.remove('active'));
+            // 显示选中的内容
+            document.getElementById('content-' + tabName).style.display = 'block';
+            // 激活选中的菜单
+            document.getElementById('tab-' + tabName).classList.add('active');
+            
+            // 如果切换到数据源配置页面，启动自动测试
+            if (tabName === 'datasource') {
+                console.log('切换到数据源页面，启动SSE测试');
+                startAutoTest();
+                if (typeof cleanupTaskManage === 'function') {
+                    cleanupTaskManage();
+                }
+            } else {
+                console.log('离开数据源页面，停止SSE测试');
+                stopAutoTest();
+            }
+            
+            // 如果切换到任务配置页面，加载任务列表
+            if (tabName === 'task-config') {
+                console.log('切换到任务配置页面，加载任务列表');
+                loadTasks();
+            }
+            
+            // 如果切换到任务监控页面，初始化
+            if (tabName === 'task-manage') {
+                console.log('切换到任务监控页面，检查initTaskManage函数');
+                if (typeof initTaskManage === 'function') {
+                    console.log('调用initTaskManage');
+                    initTaskManage();
+                } else {
+                    console.error('initTaskManage函数不存在！');
+                }
+            } else {
+                if (typeof cleanupTaskManage === 'function') {
+                    cleanupTaskManage();
+                }
+            }
+        }
+
+        // 加载数据源列表
+        async function loadDataSources() {
+            try {
+                const response = await fetch('/api/v1/datasources');
+                const result = await response.json();
+                const tbody = document.getElementById('datasourceList');
+                
+                if (!result.data || result.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">暂无数据源</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = result.data.map(ds => `
+                    <tr>
+                        <td>
+                            <i class="bi bi-${ds.type === 'mysql' ? 'database-fill' : 'search'} me-2" style="color: #667eea;"></i>
+                            <strong>${ds.name}</strong>
+                        </td>
+                        <td><span class="badge bg-primary">${ds.type === 'mysql' ? 'MySQL' : 'Elasticsearch'}</span></td>
+                        <td><code>${ds.host}:${ds.port}</code></td>
+                        <td id="status-${ds.id}">
+                            <span class="text-muted">
+                                <i class="bi bi-hourglass-split"></i> 等待测试...
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editDataSource('${ds.id}')">
+                                <i class="bi bi-pencil"></i> 编辑
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteDataSource('${ds.id}', '${ds.name}')">
+                                <i class="bi bi-trash"></i> 删除
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                // 如果当前在数据源页面，触发SSE测试
+                if (document.getElementById('content-datasource').style.display !== 'none') {
+                    startDataSourceSSE();
+                }
+            } catch (error) {
+                console.error('加载失败:', error);
+            }
+        }
+
+        // SSE连接用于数据源测试
+        let dataSourceEventSource = null;
+
+        // 启动数据源SSE测试
+        function startDataSourceSSE() {
+            // 关闭旧连接
+            if (dataSourceEventSource) {
+                dataSourceEventSource.close();
+            }
+            
+            console.log('启动数据源SSE测试');
+            dataSourceEventSource = new EventSource('/api/v1/datasources/test/stream');
+            
+            // 监听测试事件
+            dataSourceEventSource.addEventListener('test', function(e) {
+                try {
+                    const result = JSON.parse(e.data);
+                    console.log('收到测试结果:', result);
+                    updateDataSourceStatus(result);
+                } catch (error) {
+                    console.error('解析测试结果失败:', error);
+                }
+            });
+            
+            // 监听错误
+            dataSourceEventSource.onerror = function(e) {
+                console.error('数据源SSE连接错误:', e);
+            };
+            
+            // 监听连接打开
+            dataSourceEventSource.onopen = function() {
+                console.log('数据源SSE连接已建立');
+            };
+        }
+
+        // 停止数据源SSE测试
+        function stopDataSourceSSE() {
+            if (dataSourceEventSource) {
+                console.log('关闭数据源SSE连接');
+                dataSourceEventSource.close();
+                dataSourceEventSource = null;
+            }
+        }
+
+        // 更新数据源状态
+        function updateDataSourceStatus(result) {
+            const statusCell = document.getElementById(`status-${result.id}`);
+            if (!statusCell) return;
+            
+            if (result.status === 'testing') {
+                statusCell.innerHTML = `
+                    <span class="text-muted">
+                        <i class="bi bi-hourglass-split"></i> 检测中...
+                    </span>
+                `;
+            } else if (result.status === 'success') {
+                statusCell.innerHTML = `
+                    <span class="text-success" title="${result.message}">
+                        <i class="bi bi-check-circle-fill"></i> 正常
+                    </span>
+                `;
+            } else {
+                statusCell.innerHTML = `
+                    <span class="text-danger" title="${result.message}">
+                        <i class="bi bi-x-circle-fill"></i> 失败
+                    </span>
+                `;
+            }
+        }
+
+        // 启动自动测试（使用SSE）
+        function startAutoTest() {
+            startDataSourceSSE();
+        }
+
+        // 停止自动测试
+        function stopAutoTest() {
+            stopDataSourceSSE();
+        }
+
+        // 加载任务列表
+        async function loadTasks() {
+            // 调用 task.js 中的函数
+            if (typeof loadTaskConfigs === 'function') {
+                loadTaskConfigs();
+            }
+        }
+
+        // 显示新建数据源表单
+        function showAddDataSource() {
+            document.getElementById('datasourceModal').style.display = 'block';
+            document.getElementById('datasourceForm').reset();
+            document.getElementById('datasourceId').value = '';
+            document.getElementById('modalTitle').textContent = '新建数据源';
+            document.getElementById('dsPassword').required = true;
+            document.getElementById('dsPassword').placeholder = '请输入密码';
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('datasourceModal').style.display = 'none';
+        }
+
+        // 根据类型显示/隐藏数据库名称
+        document.getElementById('dsType').addEventListener('change', function() {
+            const dbNameGroup = document.getElementById('dbNameGroup');
+            dbNameGroup.style.display = this.value === 'mysql' ? 'block' : 'none';
+        });
+
+        // 测试连接
+        async function testConnection() {
+            const data = {
+                type: document.getElementById('dsType').value,
+                host: document.getElementById('dsHost').value,
+                port: parseInt(document.getElementById('dsPort').value),
+                username: document.getElementById('dsUsername').value,
+                password: document.getElementById('dsPassword').value,
+                database_name: document.getElementById('dsDatabase').value
+            };
+
+            // 验证必填字段
+            if (!data.type) {
+                showToast('请选择数据源类型', 'warning');
+                return;
+            }
+            if (!data.host) {
+                showToast('请输入主机地址', 'warning');
+                return;
+            }
+            if (!data.port || data.port <= 0) {
+                showToast('请输入有效的端口号', 'warning');
+                return;
+            }
+            if (!data.username) {
+                showToast('请输入用户名', 'warning');
+                return;
+            }
+            if (!data.password) {
+                showToast('请输入密码', 'warning');
+                return;
+            }
+
+            try {
+                showToast('正在测试连接...', 'info');
+                const response = await fetch('/api/v1/datasources/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    showToast('连接成功！版本: ' + (result.data.version || '未知'), 'success');
+                } else {
+                    showToast('连接失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('连接失败: ' + error.message, 'error');
+            }
+        }
+
+        // 提交数据源表单
+        document.getElementById('datasourceForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const id = document.getElementById('datasourceId').value;
+            const data = {
+                name: document.getElementById('dsName').value,
+                type: document.getElementById('dsType').value,
+                host: document.getElementById('dsHost').value,
+                port: parseInt(document.getElementById('dsPort').value),
+                username: document.getElementById('dsUsername').value,
+                password: document.getElementById('dsPassword').value,
+                database_name: document.getElementById('dsDatabase').value
+            };
+
+            try {
+                const url = id ? `/api/v1/datasources/${id}` : '/api/v1/datasources';
+                const method = id ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    showToast(id ? '更新成功！' : '创建成功！', 'success');
+                    closeModal();
+                    loadDataSources();
+                } else {
+                    showToast('操作失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+            }
+        });
+
+        // 编辑数据源
+        async function editDataSource(id) {
+            try {
+                const response = await fetch(`/api/v1/datasources/${id}`);
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    const ds = result.data;
+                    document.getElementById('datasourceId').value = ds.id;
+                    document.getElementById('dsName').value = ds.name;
+                    document.getElementById('dsType').value = ds.type;
+                    document.getElementById('dsHost').value = ds.host;
+                    document.getElementById('dsPort').value = ds.port;
+                    document.getElementById('dsUsername').value = ds.username;
+                    document.getElementById('dsDatabase').value = ds.database_name || '';
+                    document.getElementById('dsPassword').value = '';
+                    document.getElementById('dsPassword').placeholder = '留空表示不修改';
+                    document.getElementById('dsPassword').required = false;
+                    
+                    document.getElementById('dsType').dispatchEvent(new Event('change'));
+                    document.getElementById('modalTitle').textContent = '编辑数据源';
+                    document.getElementById('datasourceModal').style.display = 'block';
+                } else {
+                    showToast('加载失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('加载失败: ' + error.message, 'error');
+            }
+        }
+
+        // 删除数据源
+        function deleteDataSource(id, name) {
+            showConfirm(`确定要删除数据源"${name}"吗？<br><span class="text-danger">此操作不可恢复！</span>`, async function() {
+                try {
+                    const response = await fetch(`/api/v1/datasources/${id}`, {method: 'DELETE'});
+                    const result = await response.json();
+                    
+                    if (result.code === 200) {
+                        showToast('删除成功！', 'success');
+                        loadDataSources();
+                    } else {
+                        showToast('删除失败: ' + result.message, 'error');
+                    }
+                } catch (error) {
+                    showToast('删除失败: ' + error.message, 'error');
+                }
+            });
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+            loadDataSources();
+            loadTasks();
+            // 启动自动测试（因为默认显示数据源页面）
+            startAutoTest();
+        };
+    </script>
+</body>
+</html>

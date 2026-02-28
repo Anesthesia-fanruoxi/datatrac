@@ -1,0 +1,146 @@
+{{define "content"}}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-database"></i> 数据源管理
+                </h5>
+                <a href="/datasources/new" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> 新建数据源
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>类型</th>
+                                <th>地址</th>
+                                <th>数据库</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="datasourceTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">
+                                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                    加载中...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 加载数据源列表
+async function loadDataSources() {
+    try {
+        const response = await fetch('/api/v1/datasources');
+        const result = await response.json();
+        
+        const tbody = document.getElementById('datasourceTableBody');
+        
+        if (!result.data || result.data.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-muted">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                        暂无数据源，请点击右上角"新建数据源"按钮创建
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = result.data.map(ds => `
+            <tr>
+                <td>
+                    <i class="bi bi-${ds.type === 'mysql' ? 'database' : 'search'} me-2"></i>
+                    ${ds.name}
+                </td>
+                <td>
+                    <span class="badge bg-${ds.type === 'mysql' ? 'primary' : 'success'}">
+                        ${ds.type === 'mysql' ? 'MySQL' : 'Elasticsearch'}
+                    </span>
+                </td>
+                <td>${ds.host}:${ds.port}</td>
+                <td>${ds.database_name || '-'}</td>
+                <td>${formatDate(ds.created_at)}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-info" onclick="testConnection('${ds.id}')">
+                        <i class="bi bi-plug"></i> 测试
+                    </button>
+                    <a href="/datasources/${ds.id}/edit" class="btn btn-sm btn-outline-warning">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDataSource('${ds.id}', '${ds.name}')">
+                        <i class="bi bi-trash"></i> 删除
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('加载数据源失败:', error);
+        document.getElementById('datasourceTableBody').innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    加载失败: ${error.message}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+// 测试连接
+async function testConnection(id) {
+    if (!confirm('确定要测试此数据源的连接吗？')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/datasources/${id}/test`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.code === 200) {
+            alert('连接测试成功！\n版本: ' + (result.data.version || '未知'));
+        } else {
+            alert('连接测试失败: ' + result.message);
+        }
+    } catch (error) {
+        alert('连接测试失败: ' + error.message);
+    }
+}
+
+// 删除数据源
+async function deleteDataSource(id, name) {
+    if (!confirm(`确定要删除数据源"${name}"吗？\n此操作不可恢复！`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/datasources/${id}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.code === 200) {
+            alert('删除成功！');
+            loadDataSources();
+        } else {
+            alert('删除失败: ' + result.message);
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+// 页面加载时获取数据
+loadDataSources();
+</script>
+{{end}}

@@ -1,0 +1,119 @@
+{{define "content"}}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-list-task"></i> 任务管理
+                </h5>
+                <a href="/tasks/new" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> 新建任务
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>任务名称</th>
+                                <th>同步方向</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskTableBody">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>
+                                    加载中...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadTasks() {
+    try {
+        const response = await fetch('/api/v1/tasks');
+        const result = await response.json();
+        
+        const tbody = document.getElementById('taskTableBody');
+        
+        if (!result.data || result.data.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center text-muted">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                        暂无任务，请点击右上角"新建任务"按钮创建
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = result.data.map(task => `
+            <tr>
+                <td>${task.name}</td>
+                <td>
+                    <span class="badge bg-info">
+                        ${task.source_type} → ${task.target_type}
+                    </span>
+                </td>
+                <td>${getStatusBadge(task.status)}</td>
+                <td>${formatDate(task.created_at)}</td>
+                <td>
+                    <a href="/tasks/${task.id}/monitor" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-activity"></i> 监控
+                    </a>
+                    <a href="/tasks/${task.id}/edit" class="btn btn-sm btn-outline-warning">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTask('${task.id}', '${task.name}')">
+                        <i class="bi bi-trash"></i> 删除
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('加载任务失败:', error);
+    }
+}
+
+function getStatusBadge(status) {
+    const badges = {
+        'idle': '<span class="badge bg-secondary">空闲</span>',
+        'running': '<span class="badge bg-primary">运行中</span>',
+        'paused': '<span class="badge bg-warning">已暂停</span>',
+        'completed': '<span class="badge bg-success">已完成</span>',
+        'failed': '<span class="badge bg-danger">失败</span>'
+    };
+    return badges[status] || '<span class="badge bg-secondary">未知</span>';
+}
+
+async function deleteTask(id, name) {
+    if (!confirm(`确定要删除任务"${name}"吗？`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/tasks/${id}`, {method: 'DELETE'});
+        const result = await response.json();
+        
+        if (result.code === 200) {
+            alert('删除成功！');
+            loadTasks();
+        } else {
+            alert('删除失败: ' + result.message);
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+loadTasks();
+</script>
+{{end}}

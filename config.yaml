@@ -1,0 +1,22 @@
+# DataTrace 配置文件
+
+# 数据库配置
+database:
+  host: 192.168.6.2
+  port: 3306
+  username: root
+  password: root
+  database: datatrace
+  max_open_conns: 100
+  max_idle_conns: 10
+
+# 服务器配置
+server:
+  port: 8080
+  mode: release  # debug 或 release（release 模式会禁用 Gin 的调试日志）
+
+# 安全配置
+security:
+  # 加密密钥（32字节，用于 AES-256-GCM 加密数据源密码）
+  # 请修改为您自己的密钥！
+  encryption_key: "iVVhYa1opv2B7IbVxRZr1sVHJIOqr3Sb"

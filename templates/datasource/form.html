@@ -1,0 +1,210 @@
+{{define "content"}}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-database"></i> {{if .DataSource}}编辑数据源{{else}}新建数据源{{end}}
+                </h5>
+            </div>
+            <div class="card-body">
+                <form id="datasourceForm">
+                    <input type="hidden" id="datasourceId" value="{{if .DataSource}}{{.DataSource.ID}}{{end}}">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" placeholder="例如: 生产环境MySQL" 
+                               value="{{if .DataSource}}{{.DataSource.Name}}{{end}}" required>
+                        <div class="form-text">数据源的显示名称</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">类型 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="type" required {{if .DataSource}}disabled{{end}}>
+                            <option value="">请选择</option>
+                            <option value="mysql" {{if .DataSource}}{{if eq .DataSource.Type "mysql"}}selected{{end}}{{end}}>MySQL</option>
+                            <option value="elasticsearch" {{if .DataSource}}{{if eq .DataSource.Type "elasticsearch"}}selected{{end}}{{end}}>Elasticsearch</option>
+                        </select>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label class="form-label">主机地址 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="host" placeholder="例如: localhost" 
+                                       value="{{if .DataSource}}{{.DataSource.Host}}{{end}}" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">端口 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="port" placeholder="3306" 
+                                       value="{{if .DataSource}}{{.DataSource.Port}}{{end}}" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="username" placeholder="root" 
+                               value="{{if .DataSource}}{{.DataSource.Username}}{{end}}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">密码 <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control" id="password" 
+                               placeholder="{{if .DataSource}}留空表示不修改{{else}}请输入密码{{end}}" 
+                               {{if not .DataSource}}required{{end}}>
+                        {{if .DataSource}}
+                        <div class="form-text">留空表示不修改密码</div>
+                        {{end}}
+                    </div>
+
+                    <div class="mb-3" id="databaseNameGroup" style="display: none;">
+                        <label class="form-label">数据库名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="databaseName" placeholder="例如: mydb" 
+                               value="{{if .DataSource}}{{.DataSource.DatabaseName}}{{end}}">
+                        <div class="form-text">MySQL 数据源必填</div>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="/datasources" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left"></i> 返回
+                        </a>
+                        <div>
+                            <button type="button" class="btn btn-info me-2" onclick="testConnection()">
+                                <i class="bi bi-plug"></i> 测试连接
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i> 保存
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const isEdit = document.getElementById('datasourceId').value !== '';
+
+// 根据类型显示/隐藏数据库名称字段
+document.getElementById('type').addEventListener('change', function() {
+    const databaseNameGroup = document.getElementById('databaseNameGroup');
+    const databaseNameInput = document.getElementById('databaseName');
+    
+    if (this.value === 'mysql') {
+        databaseNameGroup.style.display = 'block';
+        databaseNameInput.required = true;
+    } else {
+        databaseNameGroup.style.display = 'none';
+        databaseNameInput.required = false;
+    }
+});
+
+// 初始化时触发一次
+if (document.getElementById('type').value) {
+    document.getElementById('type').dispatchEvent(new Event('change'));
+}
+
+// 测试连接
+async function testConnection() {
+    const data = getFormData();
+    if (!validateForm(data)) return;
+    
+    try {
+        const response = await fetch('/api/v1/datasources/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.code === 200) {
+            alert('连接测试成功！\n版本: ' + (result.data.version || '未知'));
+        } else {
+            alert('连接测试失败: ' + result.message);
+        }
+    } catch (error) {
+        alert('连接测试失败: ' + error.message);
+    }
+}
+
+// 获取表单数据
+function getFormData() {
+    return {
+        name: document.getElementById('name').value.trim(),
+        type: document.getElementById('type').value,
+        host: document.getElementById('host').value.trim(),
+        port: parseInt(document.getElementById('port').value),
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value,
+        database_name: document.getElementById('databaseName').value.trim()
+    };
+}
+
+// 验证表单
+function validateForm(data) {
+    if (!data.name) {
+        alert('请输入数据源名称');
+        return false;
+    }
+    if (!data.type) {
+        alert('请选择数据源类型');
+        return false;
+    }
+    if (!data.host) {
+        alert('请输入主机地址');
+        return false;
+    }
+    if (!data.port || data.port <= 0) {
+        alert('请输入有效的端口号');
+        return false;
+    }
+    if (!data.username) {
+        alert('请输入用户名');
+        return false;
+    }
+    if (!isEdit && !data.password) {
+        alert('请输入密码');
+        return false;
+    }
+    if (data.type === 'mysql' && !data.database_name) {
+        alert('MySQL 数据源必须指定数据库名称');
+        return false;
+    }
+    return true;
+}
+
+// 提交表单
+document.getElementById('datasourceForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const data = getFormData();
+    if (!validateForm(data)) return;
+    
+    try {
+        const id = document.getElementById('datasourceId').value;
+        const url = isEdit ? `/api/v1/datasources/${id}` : '/api/v1/datasources';
+        const method = isEdit ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.code === 200) {
+            alert(isEdit ? '更新成功！' : '创建成功！');
+            window.location.href = '/datasources';
+        } else {
+            alert('操作失败: ' + result.message);
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+});
+</script>
+{{end}}

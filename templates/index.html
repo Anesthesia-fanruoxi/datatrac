@@ -1,0 +1,160 @@
+{{define "content"}}
+<div class="row">
+    <div class="col-12">
+        <div class="text-center py-5">
+            <h1 class="display-4">
+                <i class="bi bi-arrow-left-right text-primary"></i>
+                DataTrace 数据同步系统
+            </h1>
+            <p class="lead text-muted">跨数据源的数据同步工具，支持 MySQL 和 Elasticsearch 之间的双向数据同步</p>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-4">
+    <!-- 数据源卡片 -->
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm hover-card">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-primary bg-gradient text-white rounded-circle mb-3">
+                    <i class="bi bi-database fs-1"></i>
+                </div>
+                <h5 class="card-title">数据源管理</h5>
+                <p class="card-text text-muted">管理 MySQL 和 Elasticsearch 数据源，支持连接测试和密码加密存储</p>
+                <a href="/datasources" class="btn btn-primary">
+                    <i class="bi bi-arrow-right"></i> 进入管理
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务管理卡片 -->
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm hover-card">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-success bg-gradient text-white rounded-circle mb-3">
+                    <i class="bi bi-list-task fs-1"></i>
+                </div>
+                <h5 class="card-title">任务管理</h5>
+                <p class="card-text text-muted">创建和管理同步任务，支持多种同步方向和灵活的配置选项</p>
+                <a href="/tasks" class="btn btn-success">
+                    <i class="bi bi-arrow-right"></i> 进入管理
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务监控卡片 -->
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm hover-card">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-info bg-gradient text-white rounded-circle mb-3">
+                    <i class="bi bi-activity fs-1"></i>
+                </div>
+                <h5 class="card-title">任务监控</h5>
+                <p class="card-text text-muted">实时监控任务执行状态，查看进度和日志信息</p>
+                <a href="/tasks" class="btn btn-info">
+                    <i class="bi bi-arrow-right"></i> 查看任务
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 功能特性 -->
+<div class="row mt-5">
+    <div class="col-12">
+        <h3 class="text-center mb-4">核心特性</h3>
+    </div>
+    <div class="col-md-3">
+        <div class="text-center">
+            <i class="bi bi-arrow-repeat text-primary fs-1"></i>
+            <h6 class="mt-2">双向同步</h6>
+            <p class="text-muted small">支持 MySQL ↔ ES 双向同步</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="text-center">
+            <i class="bi bi-speedometer2 text-success fs-1"></i>
+            <h6 class="mt-2">高性能</h6>
+            <p class="text-muted small">并发执行，批量处理</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="text-center">
+            <i class="bi bi-shield-check text-info fs-1"></i>
+            <h6 class="mt-2">断点续传</h6>
+            <p class="text-muted small">支持任务暂停和恢复</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="text-center">
+            <i class="bi bi-graph-up text-warning fs-1"></i>
+            <h6 class="mt-2">实时监控</h6>
+            <p class="text-muted small">实时进度和日志展示</p>
+        </div>
+    </div>
+</div>
+
+<!-- 统计信息 -->
+<div class="row mt-5">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="text-primary" id="datasourceCount">0</h2>
+                <p class="text-muted mb-0">数据源</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="text-success" id="taskCount">0</h2>
+                <p class="text-muted mb-0">同步任务</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="text-info" id="runningCount">0</h2>
+                <p class="text-muted mb-0">运行中</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="text-warning" id="completedCount">0</h2>
+                <p class="text-muted mb-0">已完成</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 加载统计数据
+async function loadStats() {
+    try {
+        const [datasources, tasks] = await Promise.all([
+            fetch('/api/v1/datasources').then(r => r.json()),
+            fetch('/api/v1/tasks').then(r => r.json())
+        ]);
+        
+        document.getElementById('datasourceCount').textContent = datasources.data?.length || 0;
+        document.getElementById('taskCount').textContent = tasks.data?.length || 0;
+        
+        const runningTasks = tasks.data?.filter(t => t.status === 'running') || [];
+        const completedTasks = tasks.data?.filter(t => t.status === 'completed') || [];
+        
+        document.getElementById('runningCount').textContent = runningTasks.length;
+        document.getElementById('completedCount').textContent = completedTasks.length;
+    } catch (error) {
+        console.error('加载统计数据失败:', error);
+    }
+}
+
+// 页面加载时获取统计数据
+loadStats();
+</script>
+{{end}}
