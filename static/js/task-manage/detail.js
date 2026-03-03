@@ -57,8 +57,7 @@
                 return;
             }
             
-            const tableUnitsHtml = window.TaskManageUI.buildTableUnitsHtml(progress);
-            
+            // 简化的进度展示，只显示汇总信息
             progressContent.innerHTML = `
                 <div class="progress-item">
                     <div class="progress-label">
@@ -74,7 +73,7 @@
                 
                 <div class="progress-item">
                     <div class="progress-label">
-                        <span class="progress-label-text">已同步表</span>
+                        <span class="progress-label-text">已完成表</span>
                         <span class="progress-label-value">${progress.completed_tables} / ${progress.total_tables}</span>
                     </div>
                     <div class="progress" style="height: 8px;">
@@ -84,7 +83,33 @@
                     </div>
                 </div>
                 
-                ${tableUnitsHtml}
+                <div class="progress-item">
+                    <div class="progress-label">
+                        <span class="progress-label-text">已处理记录</span>
+                        <span class="progress-label-value">${progress.processed_records.toLocaleString()} / ${progress.total_records.toLocaleString()}</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-info" role="progressbar" 
+                             style="width: ${progress.total_records > 0 ? (progress.processed_records / progress.total_records * 100).toFixed(1) : 0}%;" 
+                             aria-valuenow="${progress.processed_records}" aria-valuemin="0" aria-valuemax="${progress.total_records}"></div>
+                    </div>
+                </div>
+                
+                ${progress.running_tables > 0 ? `
+                <div class="alert alert-info mt-3 mb-0" style="font-size: 14px;">
+                    <i class="bi bi-info-circle me-2"></i>
+                    正在同步 ${progress.running_tables} 个表
+                    ${progress.sync_speed > 0 ? `，速度: ${progress.sync_speed.toLocaleString()} 条/秒` : ''}
+                    ${progress.estimated_time ? `，预计剩余: ${progress.estimated_time}` : ''}
+                </div>
+                ` : ''}
+                
+                ${progress.failed_tables > 0 ? `
+                <div class="alert alert-danger mt-3 mb-0" style="font-size: 14px;">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    ${progress.failed_tables} 个表同步失败
+                </div>
+                ` : ''}
             `;
             
             window.TaskManageUI.updateStatsBar(progress);

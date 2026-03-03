@@ -4,105 +4,10 @@
     
     window.TaskManageUI = {};
     
-    // 构建任务单元列表HTML
+    // 构建任务单元列表HTML（已废弃，不再使用）
+    // 保留此函数以保持向后兼容，但不再调用
     function buildTableUnitsHtml(progress) {
-        if (!progress.table_units || progress.table_units.length === 0) {
-            return '';
-        }
-        
-        // 排序：running → pending → completed/failed/paused
-        const sortedUnits = [...progress.table_units].sort((a, b) => {
-            const order = { 'running': 1, 'pending': 2, 'completed': 3, 'failed': 3, 'paused': 3 };
-            return (order[a.status] || 99) - (order[b.status] || 99);
-        });
-        
-        // 为不同的数据库分配颜色
-        const dbColors = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#30cfd0', '#a8edea', '#fbc2eb'];
-        const dbColorMap = {};
-        let colorIndex = 0;
-        
-        sortedUnits.forEach(unit => {
-            const dbName = unit.name.split('.')[0];
-            if (!dbColorMap[dbName]) {
-                dbColorMap[dbName] = dbColors[colorIndex % dbColors.length];
-                colorIndex++;
-            }
-        });
-        
-        return `
-            <div style="margin-top: 20px;">
-                <h6 style="color: #2d3748; font-size: 14px; font-weight: 600; margin-bottom: 12px;">
-                    <i class="bi bi-table me-2"></i>同步表列表
-                </h6>
-                <div>
-                    ${sortedUnits.map(unit => {
-                        // 使用任务单元的实际状态
-                        const displayStatus = unit.status;
-                        
-                        const statusIcon = {
-                            'pending': '<i class="bi bi-clock text-secondary"></i>',
-                            'running': '<i class="bi bi-arrow-repeat text-primary"></i>',
-                            'completed': '<i class="bi bi-check-circle text-success"></i>',
-                            'failed': '<i class="bi bi-x-circle text-danger"></i>',
-                            'paused': '<i class="bi bi-pause-circle text-warning"></i>'
-                        }[displayStatus] || '<i class="bi bi-circle text-muted"></i>';
-                        
-                        const statusText = {
-                            'pending': '等待中',
-                            'running': '同步中',
-                            'completed': '已完成',
-                            'failed': '失败',
-                            'paused': '已暂停'
-                        }[displayStatus] || '未知';
-                        
-                        const parts = unit.name.split('.');
-                        const dbName = parts[0];
-                        const tableName = parts.slice(1).join('.');
-                        const dbColor = dbColorMap[dbName];
-                        
-                        const bgColor = displayStatus === 'completed' ? '#f0fdf4' : '#f8f9fa';
-                        const borderColor = displayStatus === 'completed' ? '#22c55e' : 
-                            displayStatus === 'running' ? '#1890ff' : 
-                            displayStatus === 'failed' ? '#ff4d4f' : '#d9d9d9';
-                        
-                        // 计算进度百分比
-                        const progressPercent = unit.total_records > 0 ? unit.progress : (displayStatus === 'completed' ? 100 : 0);
-                        
-                        return `
-                            <div style="padding: 10px; margin-bottom: 8px; background: ${bgColor}; border-radius: 6px; border-left: 3px solid ${borderColor};">
-                                <div style="display: flex; align-items: center; gap: 12px;">
-                                    <div style="flex-shrink: 0;">
-                                        ${statusIcon}
-                                    </div>
-                                    <div style="flex: 1; min-width: 0;">
-                                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                                            <div style="font-size: 13px; font-weight: 500; color: #2d3748;">
-                                                <span style="color: ${dbColor}; font-weight: 600;">${dbName}</span>
-                                                <span style="color: #718096;">.</span>
-                                                <span>${tableName}</span>
-                                                <span style="font-size: 12px; color: #718096; margin-left: 8px;">${statusText}</span>
-                                            </div>
-                                            <span style="font-size: 11px; color: #718096; white-space: nowrap;">
-                                                ${unit.processed_records.toLocaleString()} / ${unit.total_records.toLocaleString()} (${progressPercent.toFixed(1)}%)
-                                            </span>
-                                        </div>
-                                        <div style="display: flex; align-items: center; gap: 8px;">
-                                            <div class="progress" style="flex: 1; height: 4px;">
-                                                <div class="progress-bar ${
-                                                    displayStatus === 'completed' ? 'bg-success' : 
-                                                    displayStatus === 'running' ? 'bg-primary' : 
-                                                    displayStatus === 'failed' ? 'bg-danger' : 'bg-secondary'
-                                                }" style="width: ${progressPercent}%;"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-        `;
+        return '';
     }
     window.TaskManageUI.buildTableUnitsHtml = buildTableUnitsHtml;
 
@@ -120,9 +25,27 @@
             return;
         }
         
-        const tableUnitsHtml = buildTableUnitsHtml(progress);
+        // 步骤信息
+        let stepInfo = '';
+        if (progress.current_step) {
+            const stepNames = {
+                'initialize': '初始化（创建数据库和表结构）',
+                'sync_data': '数据同步',
+                'validate': '数据校验'
+            };
+            const stepName = stepNames[progress.current_step] || progress.current_step;
+            stepInfo = `
+            <div class="alert alert-primary mb-3" style="font-size: 14px;">
+                <i class="bi bi-arrow-right-circle me-2"></i>
+                <strong>当前步骤:</strong> ${stepName}
+            </div>
+            `;
+        }
         
+        // 简化的进度展示，只显示汇总信息
         progressContent.innerHTML = `
+            ${stepInfo}
+            
             <div class="progress-item">
                 <div class="progress-label">
                     <span class="progress-label-text">总体进度</span>
@@ -137,7 +60,7 @@
             
             <div class="progress-item">
                 <div class="progress-label">
-                    <span class="progress-label-text">已同步表</span>
+                    <span class="progress-label-text">已完成表</span>
                     <span class="progress-label-value">${progress.completed_tables} / ${progress.total_tables}</span>
                 </div>
                 <div class="progress" style="height: 8px;">
@@ -147,7 +70,33 @@
                 </div>
             </div>
             
-            ${tableUnitsHtml}
+            <div class="progress-item">
+                <div class="progress-label">
+                    <span class="progress-label-text">已处理记录</span>
+                    <span class="progress-label-value">${progress.processed_records.toLocaleString()} / ${progress.total_records.toLocaleString()}</span>
+                </div>
+                <div class="progress" style="height: 8px;">
+                    <div class="progress-bar bg-info" role="progressbar" 
+                         style="width: ${progress.total_records > 0 ? (progress.processed_records / progress.total_records * 100).toFixed(1) : 0}%;" 
+                         aria-valuenow="${progress.processed_records}" aria-valuemin="0" aria-valuemax="${progress.total_records}"></div>
+                </div>
+            </div>
+            
+            ${progress.running_tables > 0 ? `
+            <div class="alert alert-info mt-3 mb-0" style="font-size: 14px;">
+                <i class="bi bi-info-circle me-2"></i>
+                正在同步 ${progress.running_tables} 个表
+                ${progress.sync_speed > 0 ? `，速度: ${progress.sync_speed.toLocaleString()} 条/秒` : ''}
+                ${progress.estimated_time ? `，预计剩余: ${progress.estimated_time}` : ''}
+            </div>
+            ` : ''}
+            
+            ${progress.failed_tables > 0 ? `
+            <div class="alert alert-danger mt-3 mb-0" style="font-size: 14px;">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                ${progress.failed_tables} 个表同步失败
+            </div>
+            ` : ''}
         `;
         
         updateStatsBar(progress);
@@ -158,15 +107,11 @@
     function updateStatsBar(progress) {
         if (!progress) return;
         
-        let totalProcessed = 0;
-        if (progress.table_units && progress.table_units.length > 0) {
-            totalProcessed = progress.table_units.reduce((sum, unit) => sum + unit.processed_records, 0);
-        }
-        
+        // 使用新的简化数据结构
         document.getElementById('statSpeed').textContent = progress.sync_speed > 0 ? 
-            progress.sync_speed.toLocaleString() : '0.00';
+            progress.sync_speed.toLocaleString() : '0';
         document.getElementById('statRemaining').textContent = progress.estimated_time || '-';
-        document.getElementById('statProcessed').textContent = totalProcessed.toLocaleString();
+        document.getElementById('statProcessed').textContent = progress.processed_records.toLocaleString();
         document.getElementById('statProgress').textContent = progress.overall_progress.toFixed(1) + '%';
     }
     window.TaskManageUI.updateStatsBar = updateStatsBar;

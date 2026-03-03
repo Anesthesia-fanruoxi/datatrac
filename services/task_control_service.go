@@ -2,8 +2,10 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"datatrace/database"
 	"datatrace/models"
+	"datatrace/utils"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -101,49 +103,156 @@ func (s *TaskControlService) StartTask(taskID string) error {
 		return fmt.Errorf("没有待处理的任务单元")
 	}
 
-	// 6. 更新任务为运行状态
+	// 8. 外键分析和排序
+	logService.Info(taskID, "开始分析表的外键依赖关系...")
+
+	sortedUnits, hasForeignKeys, _, err := s.sortUnitsByForeignKeys(&task, units, &config)
+	if err != nil {
+		logService.Error(taskID, fmt.Sprintf("外键分析失败: %v", err))
+		return fmt.Errorf("外键分析失败: %w", err)
+	}
+
+	if hasForeignKeys {
+		logService.Info(taskID, "检测到外键依赖,将按依赖顺序初始化")
+	} else {
+		logService.Info(taskID, "未检测到外键依赖")
+	}
+
+	// 9. 更新任务为运行状态
 	task.IsRunning = true
+	task.CurrentStep = "initialize"
 	if err := database.DB.Save(&task).Error; err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
-	// 7. 创建任务队列和context
+	// 10. 创建context和execution
 	ctx, cancel := context.WithCancel(context.Background())
-	taskQueue := make(chan *models.TaskUnitRuntime, len(units))
 
 	execution := &TaskExecution{
 		TaskID:    taskID,
 		Cancel:    cancel,
-		TaskQueue: taskQueue,
+		TaskQueue: nil, // 新流程不使用队列
 		WaitGroup: &sync.WaitGroup{},
 	}
 	s.executions.Store(taskID, execution)
 
-	// 8. 将所有任务单元放入队列
-	for i := range units {
-		taskQueue <- &units[i]
-	}
-	close(taskQueue) // 关闭队列，表示没有更多任务
-
-	// 9. 启动Worker Pool
-	engine := NewSyncEngine()
-	for i := 0; i < threadCount; i++ {
-		execution.WaitGroup.Add(1)
-		go func(workerID int) {
-			defer execution.WaitGroup.Done()
-			engine.Worker(ctx, taskID, taskQueue, workerID)
-		}(i)
-	}
-
-	// 10. 启动监控goroutine，等待所有Worker完成
+	// 11. 启动异步执行流程
+	execution.WaitGroup.Add(1)
 	go func() {
-		execution.WaitGroup.Wait()
-		s.executions.Delete(taskID)
+		defer execution.WaitGroup.Done()
+		defer func() {
+			s.executions.Delete(taskID)
+			// 更新任务状态
+			database.DB.Model(&models.SyncTask{}).
+				Where("id = ?", taskID).
+				Updates(map[string]interface{}{
+					"is_running":   false,
+					"current_step": "",
+				})
+		}()
 
-		// 所有Worker完成，更新is_running为false
+		engine := NewSyncEngine()
+
+		// ========== 阶段1: 初始化（创建数据库和表结构） ==========
+		logService.Info(taskID, "========== 开始全量同步 ==========")
+		logService.Info(taskID, "步骤 1/2: 初始化阶段")
+
+		if err := engine.InitializeWorker(ctx, taskID, sortedUnits); err != nil {
+			logService.Error(taskID, fmt.Sprintf("初始化阶段失败: %v", err))
+			return
+		}
+
+		// 检查是否被取消
+		select {
+		case <-ctx.Done():
+			logService.Info(taskID, "任务被取消")
+			return
+		default:
+		}
+
+		// ========== 阶段2: 数据同步 ==========
+		logService.Info(taskID, "步骤 2/2: 数据同步阶段")
+
+		// 更新任务步骤
 		database.DB.Model(&models.SyncTask{}).
 			Where("id = ?", taskID).
-			Update("is_running", false)
+			Update("current_step", "sync_data")
+
+		// 分离有外键和无外键的表
+		var fkUnits []*models.TaskUnitRuntime     // 有外键依赖的表
+		var normalUnits []*models.TaskUnitRuntime // 无外键依赖的表
+
+		if hasForeignKeys {
+			// 从 sortedUnits 中分离
+			// 注意：sortedUnits 是删除顺序（子表在前），数据同步需要反转（父表在前）
+			fkTableSet := make(map[string]bool)
+
+			// 重新获取外键表集合
+			_, _, fkSet, _ := s.sortUnitsByForeignKeys(&task, units, &config)
+			fkTableSet = fkSet
+
+			for _, unit := range sortedUnits {
+				if fkTableSet[unit.UnitName] {
+					fkUnits = append(fkUnits, unit)
+				} else {
+					normalUnits = append(normalUnits, unit)
+				}
+			}
+
+			// 反转外键表顺序，使其变成数据同步顺序（父表在前，子表在后）
+			for i, j := 0, len(fkUnits)-1; i < j; i, j = i+1, j-1 {
+				fkUnits[i], fkUnits[j] = fkUnits[j], fkUnits[i]
+			}
+
+			logService.Info(taskID, fmt.Sprintf("外键表: %d 个（外键Worker串行）, 普通表: %d 个（Worker池并发）", len(fkUnits), len(normalUnits)))
+		} else {
+			normalUnits = sortedUnits
+		}
+
+		// 创建队列
+		fkQueue := make(chan *models.TaskUnitRuntime, len(fkUnits))
+		normalQueue := make(chan *models.TaskUnitRuntime, len(normalUnits))
+
+		// 填充外键队列
+		for _, unit := range fkUnits {
+			fkQueue <- unit
+		}
+		close(fkQueue)
+
+		// 填充普通队列
+		for _, unit := range normalUnits {
+			normalQueue <- unit
+		}
+		close(normalQueue)
+
+		var syncWg sync.WaitGroup
+
+		// 如果有外键表，启动外键专用Worker
+		if len(fkUnits) > 0 {
+			syncWg.Add(1)
+			go func() {
+				defer syncWg.Done()
+				logService.Info(taskID, "外键Worker 启动（串行处理外键表）")
+				engine.Worker(ctx, taskID, fkQueue, -1) // workerID=-1 表示外键Worker
+				logService.Info(taskID, "外键Worker 完成")
+			}()
+		}
+
+		// 启动普通Worker池并发同步普通表
+		for i := 0; i < threadCount; i++ {
+			syncWg.Add(1)
+			go func(workerID int) {
+				defer syncWg.Done()
+				logService.Info(taskID, fmt.Sprintf("Worker %d 启动", workerID))
+				engine.Worker(ctx, taskID, normalQueue, workerID)
+				logService.Info(taskID, fmt.Sprintf("Worker %d 完成", workerID))
+			}(i)
+		}
+
+		// 等待所有Worker完成
+		syncWg.Wait()
+
+		logService.Info(taskID, "========== 全量同步完成 ==========")
 	}()
 
 	return nil
@@ -266,4 +375,159 @@ func (s *TaskControlService) initTaskUnits(taskID string) error {
 	}
 
 	return nil
+}
+
+// sortUnitsByForeignKeys 按照外键依赖关系对任务单元进行排序
+// 返回: 排序后的单元列表, 是否有外键依赖, 外键表集合(unitName -> bool), 错误
+func (s *TaskControlService) sortUnitsByForeignKeys(task *models.SyncTask, units []models.TaskUnitRuntime, config *TaskConfig) ([]*models.TaskUnitRuntime, bool, map[string]bool, error) {
+	logService := NewTaskLogService()
+	fkTableSet := make(map[string]bool) // 记录哪些表有外键依赖
+
+	// 如果只有一个表,直接返回
+	if len(units) <= 1 {
+		result := make([]*models.TaskUnitRuntime, len(units))
+		for i := range units {
+			result[i] = &units[i]
+		}
+		return result, false, fkTableSet, nil
+	}
+
+	// 需要先 Preload 关联的数据源
+	if err := database.DB.Preload("SourceConn").First(task, "id = ?", task.ID).Error; err != nil {
+		return nil, false, fkTableSet, fmt.Errorf("加载数据源信息失败: %w", err)
+	}
+
+	// 解密源数据库密码
+	crypto := utils.NewCryptoService()
+	sourcePassword, err := crypto.Decrypt(task.SourceConn.Password)
+	if err != nil {
+		return nil, false, fkTableSet, fmt.Errorf("解密源数据库密码失败: %w", err)
+	}
+
+	// 按数据库分组
+	dbGroups := make(map[string][]models.TaskUnitRuntime)
+	for _, unit := range units {
+		parts := splitTableName(unit.UnitName)
+		if len(parts) >= 1 {
+			targetDBName := parts[0]
+			dbGroups[targetDBName] = append(dbGroups[targetDBName], unit)
+		}
+	}
+
+	logService.Info(task.ID, fmt.Sprintf("共 %d 个数据库需要分析外键关系", len(dbGroups)))
+
+	// 对每个数据库的表进行排序
+	var sortedUnits []*models.TaskUnitRuntime
+	hasForeignKeys := false
+
+	for targetDBName, dbUnits := range dbGroups {
+		logService.Info(task.ID, fmt.Sprintf("正在分析数据库 %s 的 %d 个表...", targetDBName, len(dbUnits)))
+
+		// 从配置中找到源数据库名
+		var sourceDBName string
+		for _, dbSel := range config.SelectedDatabases {
+			if dbSel.Database == targetDBName {
+				sourceDBName = dbSel.SourceDatabase
+				break
+			}
+		}
+
+		if sourceDBName == "" {
+			logService.Warning(task.ID, fmt.Sprintf("未找到目标数据库 %s 对应的源数据库, 使用原顺序", targetDBName))
+			for i := range dbUnits {
+				sortedUnits = append(sortedUnits, &dbUnits[i])
+			}
+			continue
+		}
+
+		// 连接到源数据库
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
+			task.SourceConn.Username, sourcePassword, task.SourceConn.Host, task.SourceConn.Port, sourceDBName)
+
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			logService.Warning(task.ID, fmt.Sprintf("连接源数据库 %s 失败: %v, 使用原顺序", sourceDBName, err))
+			for i := range dbUnits {
+				sortedUnits = append(sortedUnits, &dbUnits[i])
+			}
+			continue
+		}
+
+		// 测试连接
+		if err := db.Ping(); err != nil {
+			logService.Warning(task.ID, fmt.Sprintf("源数据库 %s Ping 失败: %v, 使用原顺序", sourceDBName, err))
+			db.Close()
+			for i := range dbUnits {
+				sortedUnits = append(sortedUnits, &dbUnits[i])
+			}
+			continue
+		}
+
+		// 提取源表名列表（需要从配置中查找映射）
+		sourceTableNames := make([]string, 0, len(dbUnits))
+		unitMap := make(map[string]*models.TaskUnitRuntime)
+
+		for i, unit := range dbUnits {
+			parts := splitTableName(unit.UnitName)
+			if len(parts) >= 2 {
+				targetTableName := parts[1]
+				// 从配置中找到源表名
+				var sourceTableName string
+				for _, dbSel := range config.SelectedDatabases {
+					if dbSel.Database == targetDBName {
+						for _, tbl := range dbSel.Tables {
+							if tbl.TargetTable == targetTableName {
+								sourceTableName = tbl.SourceTable
+								break
+							}
+						}
+						break
+					}
+				}
+
+				if sourceTableName != "" {
+					sourceTableNames = append(sourceTableNames, sourceTableName)
+					unitMap[sourceTableName] = &dbUnits[i]
+				}
+			}
+		}
+
+		// 对源表进行排序,并获取外键表列表
+		sortedSourceTableNames, dbHasForeignKeys, fkTables, err := SortTablesForDropWithFKList(db, sourceDBName, sourceTableNames)
+		db.Close()
+
+		if err != nil {
+			logService.Warning(task.ID, fmt.Sprintf("源数据库 %s 排序失败: %v, 使用原顺序", sourceDBName, err))
+			for i := range dbUnits {
+				sortedUnits = append(sortedUnits, &dbUnits[i])
+			}
+			continue
+		}
+
+		// 如果这个数据库有外键,标记整个任务有外键
+		if dbHasForeignKeys {
+			hasForeignKeys = true
+			logService.Info(task.ID, fmt.Sprintf("源数据库 %s 检测到 %d 个外键表,已按依赖顺序排序", sourceDBName, len(fkTables)))
+
+			// 记录哪些表有外键(使用完整的 unitName: 目标库.目标表)
+			for sourceTableName := range fkTables {
+				// 找到对应的 unit
+				if unit, ok := unitMap[sourceTableName]; ok {
+					fkTableSet[unit.UnitName] = true
+				}
+			}
+		} else {
+			logService.Info(task.ID, fmt.Sprintf("源数据库 %s 未检测到外键依赖", sourceDBName))
+		}
+
+		// 按照排序后的顺序添加到结果中
+		for _, sourceTableName := range sortedSourceTableNames {
+			if unit, ok := unitMap[sourceTableName]; ok {
+				sortedUnits = append(sortedUnits, unit)
+			}
+		}
+	}
+
+	logService.Info(task.ID, "外键分析完成")
+	return sortedUnits, hasForeignKeys, fkTableSet, nil
 }

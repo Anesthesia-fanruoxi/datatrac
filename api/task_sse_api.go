@@ -21,6 +21,7 @@ func NewTaskSSEAPI() *TaskSSEAPI {
 }
 
 // StreamTaskUpdates 流式推送任务更新
+// StreamTaskUpdates 流式推送任务更新
 func (api *TaskSSEAPI) StreamTaskUpdates(c *gin.Context) {
 	taskID := c.Param("id")
 
@@ -35,7 +36,12 @@ func (api *TaskSSEAPI) StreamTaskUpdates(c *gin.Context) {
 
 	// 添加客户端
 	api.sseService.AddClient(taskID, client)
-	defer api.sseService.RemoveClient(taskID, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveClient(taskID, client)
+		close(client) // 在移除后关闭 channel
+	}()
 
 	// 获取响应写入器
 	w := c.Writer
@@ -47,7 +53,6 @@ func (api *TaskSSEAPI) StreamTaskUpdates(c *gin.Context) {
 
 	// 创建退出信号通道
 	done := make(chan struct{})
-	defer close(done)
 
 	// 启动推送协程
 	go api.sseService.StreamTaskUpdates(taskID, client, done)
@@ -59,7 +64,8 @@ func (api *TaskSSEAPI) StreamTaskUpdates(c *gin.Context) {
 	for {
 		select {
 		case <-notify:
-			// 客户端断开连接
+			// 客户端断开连接，通知推送协程退出
+			close(done)
 			return
 		case msg, ok := <-client:
 			if !ok {
@@ -69,6 +75,7 @@ func (api *TaskSSEAPI) StreamTaskUpdates(c *gin.Context) {
 			// 发送SSE消息
 			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
 			if err != nil {
+				close(done)
 				return
 			}
 			flusher.Flush()

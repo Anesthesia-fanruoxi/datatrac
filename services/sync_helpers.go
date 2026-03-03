@@ -39,10 +39,10 @@ func (e *SyncEngine) handleTableExistsStrategy(writer *MySQLWriter, sourceDB *sq
 	switch strategy {
 	case "drop":
 		if err := writer.DropTable(); err != nil {
-			return err
+			return fmt.Errorf("删除表失败: %w", err)
 		}
 		if err := writer.CreateTableLike(sourceDB, sourceTable); err != nil {
-			return err
+			return fmt.Errorf("创建表结构失败: %w", err)
 		}
 		// 记录创建表的日志
 		e.logService.AddLog(taskID, "info", fmt.Sprintf("创建表: %s", writer.tableName), "create")

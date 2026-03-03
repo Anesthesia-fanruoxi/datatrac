@@ -9,7 +9,7 @@ import (
 // DataSourceSSEService 数据源SSE服务
 type DataSourceSSEService struct {
 	dsService *DataSourceService
-	clients   map[chan DataSourceTestResult]bool
+	clients   map[chan DataSourceTestResult]struct{}
 	mu        sync.RWMutex
 }
 
@@ -30,7 +30,7 @@ func NewDataSourceSSEService() *DataSourceSSEService {
 	dsSSEOnce.Do(func() {
 		dsSSEInstance = &DataSourceSSEService{
 			dsService: NewDataSourceService(),
-			clients:   make(map[chan DataSourceTestResult]bool),
+			clients:   make(map[chan DataSourceTestResult]struct{}),
 		}
 	})
 	return dsSSEInstance
@@ -40,19 +40,25 @@ func NewDataSourceSSEService() *DataSourceSSEService {
 func (s *DataSourceSSEService) AddClient(client chan DataSourceTestResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clients[client] = true
+	s.clients[client] = struct{}{}
 }
 
-// RemoveClient 移除客户端
+// RemoveClient 移除客户端（不关闭 channel，由调用方管理）
 func (s *DataSourceSSEService) RemoveClient(client chan DataSourceTestResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.clients, client)
-	close(client)
 }
 
-// TestAllDataSources 测试所有数据源并推送结果
+// TestAllDataSources 测试所有数据源并推送结果（安全发送，防止 panic）
 func (s *DataSourceSSEService) TestAllDataSources(client chan DataSourceTestResult) {
+	// 使用 defer + recover 防止 panic
+	defer func() {
+		if r := recover(); r != nil {
+			// channel 已关闭，忽略错误
+		}
+	}()
+
 	// 获取所有数据源
 	dataSources, err := s.dsService.List()
 	if err != nil {

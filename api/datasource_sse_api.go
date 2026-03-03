@@ -33,7 +33,12 @@ func (api *DataSourceSSEAPI) StreamTestResults(c *gin.Context) {
 
 	// 添加客户端
 	api.sseService.AddClient(client)
-	defer api.sseService.RemoveClient(client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveClient(client)
+		close(client) // 在移除后关闭 channel
+	}()
 
 	// 获取响应写入器
 	w := c.Writer

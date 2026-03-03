@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -23,8 +24,8 @@ func NewMySQLReader(host string, port int, username, password, database, tableNa
 		return nil, fmt.Errorf("表名校验失败: %w", err)
 	}
 
-	// 构建连接字符串
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	// 构建连接字符串,添加超时参数
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s&readTimeout=30s",
 		username, password, host, port, database)
 
 	// 连接数据库
@@ -33,8 +34,15 @@ func NewMySQLReader(host string, port int, username, password, database, tableNa
 		return nil, fmt.Errorf("连接数据库失败: %w", err)
 	}
 
+	// 优化连接池参数,避免连接数过多
+	db.SetMaxOpenConns(2)                   // 每个Reader最多2个连接
+	db.SetMaxIdleConns(1)                   // 最多1个空闲连接
+	db.SetConnMaxLifetime(1 * time.Minute)  // 连接1分钟后回收
+	db.SetConnMaxIdleTime(30 * time.Second) // 空闲30秒后关闭
+
 	// 测试连接
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("数据库连接测试失败: %w", err)
 	}
 
@@ -47,6 +55,7 @@ func NewMySQLReader(host string, port int, username, password, database, tableNa
 
 	// 查询总记录数
 	if err := reader.queryTotalCount(); err != nil {
+		db.Close()
 		return nil, err
 	}
 

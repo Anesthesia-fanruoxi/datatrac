@@ -15,33 +15,34 @@ func NewTaskProgressService() *TaskProgressService {
 	return &TaskProgressService{}
 }
 
-// TaskProgress 任务进度信息
+// TaskProgress 任务进度信息（简化版，减少前端渲染压力）
 type TaskProgress struct {
-	TaskID           string      `json:"task_id"`
-	TaskName         string      `json:"task_name"`
-	Status           string      `json:"status"`
-	SyncMode         string      `json:"sync_mode"`
-	OverallProgress  float64     `json:"overall_progress"`  // 总体进度百分比
-	TotalTables      int         `json:"total_tables"`      // 总表数
-	CompletedTables  int         `json:"completed_tables"`  // 已完成表数
-	CurrentTable     string      `json:"current_table"`     // 当前同步表
-	CurrentProgress  float64     `json:"current_progress"`  // 当前表进度百分比
-	TotalRecords     int64       `json:"total_records"`     // 当前表总记录数
-	ProcessedRecords int64       `json:"processed_records"` // 当前表已处理记录数
-	SyncSpeed        int64       `json:"sync_speed"`        // 同步速度（条/秒）
-	ElapsedTime      string      `json:"elapsed_time"`      // 已用时间
-	EstimatedTime    string      `json:"estimated_time"`    // 预计剩余时间
-	StartedAt        *time.Time  `json:"started_at"`        // 开始时间
-	TableUnits       []TableUnit `json:"table_units"`       // 任务单元列表
+	TaskID           string     `json:"task_id"`
+	TaskName         string     `json:"task_name"`
+	Status           string     `json:"status"`
+	SyncMode         string     `json:"sync_mode"`
+	CurrentStep      string     `json:"current_step"`      // 当前步骤: initialize/sync_data/validate
+	TotalTables      int        `json:"total_tables"`      // 总表数
+	CompletedTables  int        `json:"completed_tables"`  // 已完成表数
+	RunningTables    int        `json:"running_tables"`    // 运行中表数
+	FailedTables     int        `json:"failed_tables"`     // 失败表数
+	TotalRecords     int64      `json:"total_records"`     // 总记录数
+	ProcessedRecords int64      `json:"processed_records"` // 已处理记录数
+	OverallProgress  float64    `json:"overall_progress"`  // 总体进度百分比
+	SyncSpeed        int64      `json:"sync_speed"`        // 同步速度（条/秒）
+	ElapsedTime      string     `json:"elapsed_time"`      // 已用时间
+	EstimatedTime    string     `json:"estimated_time"`    // 预计剩余时间
+	StartedAt        *time.Time `json:"started_at"`        // 开始时间
 }
 
-// TableUnit 表单元信息
+// TableUnit 表单元信息（已废弃，不再使用）
+// 保留此结构体定义以保持向后兼容，但不再填充数据
 type TableUnit struct {
-	Name             string  `json:"name"`              // 表名
-	Status           string  `json:"status"`            // pending/running/completed/failed/paused
-	TotalRecords     int64   `json:"total_records"`     // 总记录数
-	ProcessedRecords int64   `json:"processed_records"` // 已处理记录数
-	Progress         float64 `json:"progress"`          // 进度百分比
+	Name             string  `json:"name"`
+	Status           string  `json:"status"`
+	TotalRecords     int64   `json:"total_records"`
+	ProcessedRecords int64   `json:"processed_records"`
+	Progress         float64 `json:"progress"`
 }
 
 // GetTaskProgress 获取任务进度
@@ -69,88 +70,82 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 		unitRuntimeMap[units[i].UnitName] = &units[i]
 	}
 
-	// 计算进度
-	progress := &TaskProgress{
-		TaskID:      taskID,
-		TaskName:    task.Name,
-		Status:      task.Status,
-		SyncMode:    task.SyncMode,
-		TotalTables: totalTables,
-	}
-
-	// 统计已完成表数
+	// 统计各状态表数和总记录数
 	completedCount := 0
-	var currentUnit *models.TaskUnitRuntime
+	runningCount := 0
+	failedCount := 0
 	var totalProcessed int64
 	var totalRecords int64
+	var earliestStartTime *time.Time
 
 	for i := range units {
 		unit := &units[i]
-		if unit.Status == "completed" {
+		switch unit.Status {
+		case "completed":
 			completedCount++
-		} else if unit.Status == "running" && currentUnit == nil {
-			currentUnit = unit
+		case "running":
+			runningCount++
+		case "failed":
+			failedCount++
 		}
+
 		totalProcessed += unit.ProcessedRecords
 		totalRecords += unit.TotalRecords
-	}
 
-	progress.CompletedTables = completedCount
-
-	// 计算总体进度
-	if totalTables > 0 {
-		progress.OverallProgress = float64(completedCount) / float64(totalTables) * 100
-	}
-
-	// 构建任务单元列表（基于实际的运行记录）
-	tableUnits := make([]TableUnit, 0, len(units))
-	for _, runtime := range units {
-		// 计算进度百分比
-		unitProgress := 0.0
-		if runtime.TotalRecords > 0 {
-			unitProgress = float64(runtime.ProcessedRecords) / float64(runtime.TotalRecords) * 100
-		}
-
-		unit := TableUnit{
-			Name:             runtime.UnitName,
-			Status:           runtime.Status,
-			TotalRecords:     runtime.TotalRecords,
-			ProcessedRecords: runtime.ProcessedRecords,
-			Progress:         unitProgress,
-		}
-
-		tableUnits = append(tableUnits, unit)
-	}
-	progress.TableUnits = tableUnits
-
-	// 当前表信息
-	if currentUnit != nil {
-		progress.CurrentTable = currentUnit.UnitName
-		progress.TotalRecords = currentUnit.TotalRecords
-		progress.ProcessedRecords = currentUnit.ProcessedRecords
-
-		if currentUnit.TotalRecords > 0 {
-			progress.CurrentProgress = float64(currentUnit.ProcessedRecords) / float64(currentUnit.TotalRecords) * 100
-		}
-
-		// 计算同步速度和时间
-		if currentUnit.StartedAt != nil {
-			progress.StartedAt = currentUnit.StartedAt
-			elapsed := time.Since(*currentUnit.StartedAt)
-			progress.ElapsedTime = formatDuration(elapsed)
-
-			// 计算速度（条/秒）
-			if elapsed.Seconds() > 0 {
-				progress.SyncSpeed = int64(float64(totalProcessed) / elapsed.Seconds())
-			}
-
-			// 估算剩余时间
-			if progress.SyncSpeed > 0 && totalRecords > totalProcessed {
-				remaining := totalRecords - totalProcessed
-				estimatedSeconds := float64(remaining) / float64(progress.SyncSpeed)
-				progress.EstimatedTime = formatDuration(time.Duration(estimatedSeconds) * time.Second)
+		// 找到最早的开始时间
+		if unit.StartedAt != nil {
+			if earliestStartTime == nil || unit.StartedAt.Before(*earliestStartTime) {
+				earliestStartTime = unit.StartedAt
 			}
 		}
+	}
+
+	// 计算总体进度（基于记录数）
+	overallProgress := 0.0
+	if totalRecords > 0 {
+		overallProgress = float64(totalProcessed) / float64(totalRecords) * 100
+	}
+
+	// 计算同步速度和时间
+	syncSpeed := int64(0)
+	elapsedTime := ""
+	estimatedTime := ""
+
+	if earliestStartTime != nil {
+		elapsed := time.Since(*earliestStartTime)
+		elapsedTime = formatDuration(elapsed)
+
+		// 计算速度（条/秒）
+		if elapsed.Seconds() > 0 {
+			syncSpeed = int64(float64(totalProcessed) / elapsed.Seconds())
+		}
+
+		// 估算剩余时间
+		if syncSpeed > 0 && totalRecords > totalProcessed {
+			remaining := totalRecords - totalProcessed
+			estimatedSeconds := float64(remaining) / float64(syncSpeed)
+			estimatedTime = formatDuration(time.Duration(estimatedSeconds) * time.Second)
+		}
+	}
+
+	// 构建简化的进度信息
+	progress := &TaskProgress{
+		TaskID:           taskID,
+		TaskName:         task.Name,
+		Status:           task.Status,
+		SyncMode:         task.SyncMode,
+		CurrentStep:      task.CurrentStep,
+		TotalTables:      totalTables,
+		CompletedTables:  completedCount,
+		RunningTables:    runningCount,
+		FailedTables:     failedCount,
+		TotalRecords:     totalRecords,
+		ProcessedRecords: totalProcessed,
+		OverallProgress:  overallProgress,
+		SyncSpeed:        syncSpeed,
+		ElapsedTime:      elapsedTime,
+		EstimatedTime:    estimatedTime,
+		StartedAt:        earliestStartTime,
 	}
 
 	return progress, nil

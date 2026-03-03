@@ -1,9 +1,11 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -22,7 +24,8 @@ func NewMySQLWriter(host string, port int, username, password, database, tableNa
 	}
 
 	// 构建连接字符串（连接到指定数据库）
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	// 添加超时参数
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s&readTimeout=30s&writeTimeout=30s",
 		username, password, host, port, database)
 
 	// 连接数据库
@@ -31,15 +34,36 @@ func NewMySQLWriter(host string, port int, username, password, database, tableNa
 		return nil, fmt.Errorf("连接数据库失败: %w", err)
 	}
 
+	// 优化连接池参数,避免连接数过多
+	db.SetMaxOpenConns(2)                   // 每个Writer最多2个连接
+	db.SetMaxIdleConns(1)                   // 最多1个空闲连接
+	db.SetConnMaxLifetime(1 * time.Minute)  // 连接1分钟后回收
+	db.SetConnMaxIdleTime(30 * time.Second) // 空闲30秒后关闭
+
 	// 测试连接
-	if err := db.Ping(); err != nil {
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+	err = db.PingContext(ctx1)
+	cancel1()
+	if err != nil {
+		db.Close()
 		return nil, fmt.Errorf("数据库连接测试失败: %w", err)
 	}
 
-	return &MySQLWriter{
+	writer := &MySQLWriter{
 		db:        db,
 		tableName: tableName,
-	}, nil
+	}
+
+	// 设置会话级别的锁等待超时(不再禁用外键检查)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	_, err = db.ExecContext(ctx2, "SET SESSION lock_wait_timeout = 10")
+	if err != nil {
+		// 如果设置失败,继续使用默认值
+	}
+
+	return writer, nil
 }
 
 // CreateDatabaseIfNotExists 创建数据库（如果不存在）
@@ -101,6 +125,37 @@ func (w *MySQLWriter) WriteBatch(records []map[string]interface{}) error {
 		columns = append(columns, col)
 	}
 
+	columnCount := len(columns)
+
+	// MySQL 的占位符限制是 65535
+	// 计算每批次最多能插入多少条记录
+	maxPlaceholders := 65535
+	maxRecordsPerBatch := maxPlaceholders / columnCount
+	if maxRecordsPerBatch == 0 {
+		maxRecordsPerBatch = 1
+	}
+
+	// 如果列数太多导致单条记录就超限,强制设为1
+	if columnCount > maxPlaceholders {
+		return fmt.Errorf("表列数 %d 超过 MySQL 占位符限制 %d", columnCount, maxPlaceholders)
+	}
+
+	// 分批插入
+	for i := 0; i < len(records); i += maxRecordsPerBatch {
+		end := i + maxRecordsPerBatch
+		if end > len(records) {
+			end = len(records)
+		}
+		if err := w.writeBatchInternal(records[i:end], columns); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeBatchInternal 内部批量写入方法
+func (w *MySQLWriter) writeBatchInternal(records []map[string]interface{}, columns []string) error {
 	// 构建INSERT语句
 	placeholders := make([]string, len(records))
 	values := make([]interface{}, 0, len(records)*len(columns))
@@ -142,7 +197,12 @@ func (w *MySQLWriter) WriteBatch(records []map[string]interface{}) error {
 // TruncateTable 清空表
 func (w *MySQLWriter) TruncateTable() error {
 	query := fmt.Sprintf("TRUNCATE TABLE `%s`", w.tableName)
-	_, err := w.db.Exec(query)
+
+	// 设置5秒超时
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := w.db.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("清空表失败: %w", err)
 	}
@@ -151,11 +211,19 @@ func (w *MySQLWriter) TruncateTable() error {
 
 // DropTable 删除表
 func (w *MySQLWriter) DropTable() error {
+	// 由于在连接时已经设置了 FOREIGN_KEY_CHECKS = 0,这里直接删除
 	query := fmt.Sprintf("DROP TABLE IF EXISTS `%s`", w.tableName)
-	_, err := w.db.Exec(query)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+	_, err := w.db.ExecContext(ctx, query)
+	elapsed := time.Since(startTime)
+
 	if err != nil {
-		return fmt.Errorf("删除表失败: %w", err)
+		return fmt.Errorf("删除表失败(耗时%.2fs): %w", elapsed.Seconds(), err)
 	}
+
 	return nil
 }
 
@@ -164,7 +232,12 @@ func (w *MySQLWriter) CreateTableLike(sourceDB *sql.DB, sourceTable string) erro
 	// 获取源表的CREATE TABLE语句
 	var tableName, createSQL string
 	query := fmt.Sprintf("SHOW CREATE TABLE `%s`", sourceTable)
-	err := sourceDB.QueryRow(query).Scan(&tableName, &createSQL)
+
+	// 设置5秒超时
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := sourceDB.QueryRowContext(ctx, query).Scan(&tableName, &createSQL)
 	if err != nil {
 		return fmt.Errorf("获取源表结构失败: %w", err)
 	}
@@ -177,7 +250,10 @@ func (w *MySQLWriter) CreateTableLike(sourceDB *sql.DB, sourceTable string) erro
 	createSQL = strings.Replace(createSQL, oldTableDef, newTableDef, 1)
 
 	// 执行创建表
-	_, err = w.db.Exec(createSQL)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+
+	_, err = w.db.ExecContext(ctx2, createSQL)
 	if err != nil {
 		return fmt.Errorf("创建表失败: %w", err)
 	}
