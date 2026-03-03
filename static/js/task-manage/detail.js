@@ -28,11 +28,36 @@
             await loadTaskProgress(taskId);
             await loadTaskLogs(taskId);
             
+            // 如果任务正在运行，自动启动SSE连接
+            if (window.TaskManageCore.currentTask.is_running) {
+                // 启动日志SSE（一直保持连接）
+                console.log('任务运行中，启动日志SSE');
+                if (window.TaskManageCore.startLogSSE) {
+                    window.TaskManageCore.startLogSSE(taskId);
+                }
+                
+                // 启动当前步骤的进度SSE
+                const currentStep = getCurrentProgressStep();
+                console.log('任务运行中，启动步骤进度SSE:', currentStep);
+                if (window.TaskManageCore.startProgressSSE) {
+                    window.TaskManageCore.startProgressSSE(taskId, currentStep);
+                }
+            }
+            
         } catch (error) {
             console.error('加载任务详情失败:', error);
         }
     }
     window.TaskManageDetail.loadTaskDetail = loadTaskDetail;
+    
+    // 获取当前激活的进度步骤
+    function getCurrentProgressStep() {
+        const activeTab = document.querySelector('.progress-step-tab.active');
+        if (activeTab) {
+            return activeTab.getAttribute('data-step');
+        }
+        return 'initialize'; // 默认返回初始化步骤
+    }
 
     // 加载任务进度
     async function loadTaskProgress(taskId) {
@@ -45,73 +70,40 @@
             }
             
             const progress = result.data;
-            const progressContent = document.getElementById('progressContent');
             
             if (!progress || progress.total_tables === 0) {
-                progressContent.innerHTML = `
+                document.getElementById('progressStep-initialize').innerHTML = `
                     <div class="empty-state">
                         <i class="bi bi-inbox"></i>
                         <div>任务尚未开始</div>
                     </div>
                 `;
+                document.getElementById('progressStep-sync_data').innerHTML = `
+                    <div class="empty-state">
+                        <i class="bi bi-inbox"></i>
+                        <div>等待初始化完成</div>
+                    </div>
+                `;
                 return;
             }
             
-            // 简化的进度展示，只显示汇总信息
-            progressContent.innerHTML = `
-                <div class="progress-item">
-                    <div class="progress-label">
-                        <span class="progress-label-text">总体进度</span>
-                        <span class="progress-label-value">${progress.overall_progress.toFixed(1)}%</span>
-                    </div>
-                    <div class="progress" style="height: 8px;">
-                        <div class="progress-bar" role="progressbar" 
-                             style="width: ${progress.overall_progress}%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);" 
-                             aria-valuenow="${progress.overall_progress}" aria-valuemin="0" aria-valuemax="100"></div>
-                    </div>
-                </div>
-                
-                <div class="progress-item">
-                    <div class="progress-label">
-                        <span class="progress-label-text">已完成表</span>
-                        <span class="progress-label-value">${progress.completed_tables} / ${progress.total_tables}</span>
-                    </div>
-                    <div class="progress" style="height: 8px;">
-                        <div class="progress-bar bg-success" role="progressbar" 
-                             style="width: ${(progress.completed_tables / progress.total_tables * 100).toFixed(1)}%;" 
-                             aria-valuenow="${progress.completed_tables}" aria-valuemin="0" aria-valuemax="${progress.total_tables}"></div>
-                    </div>
-                </div>
-                
-                <div class="progress-item">
-                    <div class="progress-label">
-                        <span class="progress-label-text">已处理记录</span>
-                        <span class="progress-label-value">${progress.processed_records.toLocaleString()} / ${progress.total_records.toLocaleString()}</span>
-                    </div>
-                    <div class="progress" style="height: 8px;">
-                        <div class="progress-bar bg-info" role="progressbar" 
-                             style="width: ${progress.total_records > 0 ? (progress.processed_records / progress.total_records * 100).toFixed(1) : 0}%;" 
-                             aria-valuenow="${progress.processed_records}" aria-valuemin="0" aria-valuemax="${progress.total_records}"></div>
-                    </div>
-                </div>
-                
-                ${progress.running_tables > 0 ? `
-                <div class="alert alert-info mt-3 mb-0" style="font-size: 14px;">
-                    <i class="bi bi-info-circle me-2"></i>
-                    正在同步 ${progress.running_tables} 个表
-                    ${progress.sync_speed > 0 ? `，速度: ${progress.sync_speed.toLocaleString()} 条/秒` : ''}
-                    ${progress.estimated_time ? `，预计剩余: ${progress.estimated_time}` : ''}
-                </div>
-                ` : ''}
-                
-                ${progress.failed_tables > 0 ? `
-                <div class="alert alert-danger mt-3 mb-0" style="font-size: 14px;">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    ${progress.failed_tables} 个表同步失败
-                </div>
-                ` : ''}
-            `;
+            // 根据当前步骤切换标签和更新图标
+            if (progress.current_step === 'initialize') {
+                window.TaskManageUI.switchProgressStep('initialize');
+                window.TaskManageUI.updateStepIcon('initialize', 'running');
+                window.TaskManageUI.updateStepIcon('sync_data', 'pending');
+            } else if (progress.current_step === 'sync_data') {
+                window.TaskManageUI.switchProgressStep('sync_data');
+                window.TaskManageUI.updateStepIcon('initialize', 'completed');
+                window.TaskManageUI.updateStepIcon('sync_data', 'running');
+            } else {
+                window.TaskManageUI.switchProgressStep('initialize');
+                window.TaskManageUI.updateStepIcon('initialize', 'running');
+                window.TaskManageUI.updateStepIcon('sync_data', 'pending');
+            }
             
+            // 更新进度显示
+            window.TaskManageUI.updateProgress(progress);
             window.TaskManageUI.updateStatsBar(progress);
             
         } catch (error) {

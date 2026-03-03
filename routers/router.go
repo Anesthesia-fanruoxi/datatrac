@@ -33,7 +33,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/tasks", pageCtrl.TaskList)
 	r.GET("/tasks/new", pageCtrl.TaskNew)
 	r.GET("/tasks/:id/edit", pageCtrl.TaskEdit)
-	r.GET("/tasks/monitor", pageCtrl.TaskMonitor)
+	r.GET("/tasks/:id/monitor", pageCtrl.TaskMonitor)
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -87,7 +87,10 @@ func SetupRouter() *gin.Engine {
 			tasks.POST("/:id/stop", taskControlAPI.Stop)
 
 			// SSE流式推送
-			tasks.GET("/:id/stream", taskSSEAPI.StreamTaskUpdates)
+			tasks.GET("/:id/stream", taskSSEAPI.StreamTaskUpdates)           // 兼容旧版本
+			tasks.GET("/:id/stream/initialize", taskSSEAPI.StreamInitialize) // 初始化步骤SSE
+			tasks.GET("/:id/stream/sync", taskSSEAPI.StreamSync)             // 数据同步步骤SSE
+			tasks.GET("/:id/stream/logs", taskSSEAPI.StreamLogs)             // 日志SSE
 		}
 	}
 

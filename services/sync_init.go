@@ -7,11 +7,20 @@ import (
 	"datatrace/models"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // InitializeWorker 初始化Worker执行逻辑（串行处理所有表的初始化）
 func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units []*models.TaskUnitRuntime) error {
-	e.logService.Info(taskID, "========== 初始化阶段开始 ==========")
+	// 记录初始化开始日志
+	e.logService.AddLog(taskID, "info", "========== 初始化阶段开始 ==========", "initialize")
+	initLog := TaskLog{
+		Time:     formatLogTime(time.Now()),
+		Level:    "info",
+		Message:  "========== 初始化阶段开始 ==========",
+		Category: "initialize",
+	}
+	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{initLog})
 
 	// 更新任务步骤
 	database.DB.Model(&models.SyncTask{}).
@@ -72,7 +81,16 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		}
 	}
 
-	e.logService.Info(taskID, fmt.Sprintf("需要初始化 %d 个数据库", len(dbGroups)))
+	// 记录数据库初始化信息
+	msg := fmt.Sprintf("需要初始化 %d 个数据库", len(dbGroups))
+	e.logService.AddLog(taskID, "info", msg, "initialize")
+	dbLog := TaskLog{
+		Time:     formatLogTime(time.Now()),
+		Level:    "info",
+		Message:  msg,
+		Category: "initialize",
+	}
+	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{dbLog})
 
 	// 5. 创建所有数据库
 	for _, group := range dbGroups {
@@ -121,21 +139,53 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		}
 
 		if created {
-			e.logService.Info(taskID, fmt.Sprintf("创建数据库: %s (字符集: %s, 排序规则: %s)", group.targetDB, charset, collation))
+			msg := fmt.Sprintf("创建数据库: %s (字符集: %s, 排序规则: %s)", group.targetDB, charset, collation)
+			e.logService.AddLog(taskID, "info", msg, "initialize")
+			log := TaskLog{
+				Time:     formatLogTime(time.Now()),
+				Level:    "info",
+				Message:  msg,
+				Category: "initialize",
+			}
+			e.sseService.BroadcastLogUpdate(taskID, []TaskLog{log})
 		} else {
-			e.logService.Info(taskID, fmt.Sprintf("数据库已存在: %s", group.targetDB))
+			msg := fmt.Sprintf("数据库已存在: %s", group.targetDB)
+			e.logService.AddLog(taskID, "info", msg, "initialize")
+			log := TaskLog{
+				Time:     formatLogTime(time.Now()),
+				Level:    "info",
+				Message:  msg,
+				Category: "initialize",
+			}
+			e.sseService.BroadcastLogUpdate(taskID, []TaskLog{log})
 		}
 	}
 
 	// 6. 按顺序初始化所有表
-	e.logService.Info(taskID, fmt.Sprintf("开始初始化 %d 个表的结构", len(units)))
+	msg = fmt.Sprintf("开始初始化 %d 个表的结构", len(units))
+	e.logService.AddLog(taskID, "info", msg, "initialize")
+	tableLog := TaskLog{
+		Time:     formatLogTime(time.Now()),
+		Level:    "info",
+		Message:  msg,
+		Category: "initialize",
+	}
+	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{tableLog})
 
 	strategy := config.SyncConfig.TableExistsStrategy
 
 	// 如果是 drop 策略，需要分两个阶段：先删除所有表，再创建所有表
 	if strategy == "drop" {
 		// 阶段1：按删除顺序删除所有表（子表在前，父表在后）
-		e.logService.Info(taskID, "阶段1: 删除所有表")
+		msg = "阶段1: 删除所有表"
+		e.logService.AddLog(taskID, "info", msg, "initialize")
+		phaseLog := TaskLog{
+			Time:     formatLogTime(time.Now()),
+			Level:    "info",
+			Message:  msg,
+			Category: "initialize",
+		}
+		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{phaseLog})
 		for i, unit := range units {
 			if err := e.dropTable(ctx, taskID, unit, &task, &config, sourcePassword, targetPassword); err != nil {
 				e.logService.Error(taskID, fmt.Sprintf("删除表 %s 失败: %v", unit.UnitName, err))
@@ -143,12 +193,30 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 			}
 
 			if (i+1)%10 == 0 || (i+1) == len(units) {
-				e.logService.Info(taskID, fmt.Sprintf("删除进度: %d/%d (%.1f%%)", i+1, len(units), float64(i+1)/float64(len(units))*100))
+				msg := fmt.Sprintf("删除进度: %d/%d (%.1f%%)", i+1, len(units), float64(i+1)/float64(len(units))*100)
+				e.logService.AddLog(taskID, "info", msg, "initialize")
+				progressLog := TaskLog{
+					Time:     formatLogTime(time.Now()),
+					Level:    "info",
+					Message:  msg,
+					Category: "initialize",
+				}
+				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{progressLog})
+				// 推送初始化进度
+				e.sseService.BroadcastProgressUpdate(taskID)
 			}
 		}
 
 		// 阶段2：按创建顺序创建所有表（父表在前，子表在后，需要反转）
-		e.logService.Info(taskID, "阶段2: 创建所有表")
+		msg = "阶段2: 创建所有表"
+		e.logService.AddLog(taskID, "info", msg, "initialize")
+		phase2Log := TaskLog{
+			Time:     formatLogTime(time.Now()),
+			Level:    "info",
+			Message:  msg,
+			Category: "initialize",
+		}
+		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{phase2Log})
 		for i := len(units) - 1; i >= 0; i-- {
 			unit := units[i]
 			if err := e.createTable(ctx, taskID, unit, &task, &config, sourcePassword, targetPassword); err != nil {
@@ -158,7 +226,17 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 
 			idx := len(units) - i
 			if idx%10 == 0 || idx == len(units) {
-				e.logService.Info(taskID, fmt.Sprintf("创建进度: %d/%d (%.1f%%)", idx, len(units), float64(idx)/float64(len(units))*100))
+				msg := fmt.Sprintf("创建进度: %d/%d (%.1f%%)", idx, len(units), float64(idx)/float64(len(units))*100)
+				e.logService.AddLog(taskID, "info", msg, "initialize")
+				createLog := TaskLog{
+					Time:     formatLogTime(time.Now()),
+					Level:    "info",
+					Message:  msg,
+					Category: "initialize",
+				}
+				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{createLog})
+				// 推送初始化进度
+				e.sseService.BroadcastProgressUpdate(taskID)
 			}
 		}
 	} else {
@@ -176,12 +254,32 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 			}
 
 			if (i+1)%10 == 0 || (i+1) == len(units) {
-				e.logService.Info(taskID, fmt.Sprintf("初始化进度: %d/%d (%.1f%%)", i+1, len(units), float64(i+1)/float64(len(units))*100))
+				msg := fmt.Sprintf("初始化进度: %d/%d (%.1f%%)", i+1, len(units), float64(i+1)/float64(len(units))*100)
+				e.logService.AddLog(taskID, "info", msg, "initialize")
+				initProgressLog := TaskLog{
+					Time:     formatLogTime(time.Now()),
+					Level:    "info",
+					Message:  msg,
+					Category: "initialize",
+				}
+				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{initProgressLog})
+				// 推送初始化进度
+				e.sseService.BroadcastProgressUpdate(taskID)
 			}
 		}
 	}
 
-	e.logService.Info(taskID, "========== 初始化阶段完成 ==========")
+	// 记录初始化完成日志
+	msg = "========== 初始化阶段完成 =========="
+	e.logService.AddLog(taskID, "success", msg, "initialize")
+	completeLog := TaskLog{
+		Time:     formatLogTime(time.Now()),
+		Level:    "success",
+		Message:  msg,
+		Category: "initialize",
+	}
+	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{completeLog})
+
 	return nil
 }
 
@@ -256,7 +354,7 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unit *m
 	// 5. 更新总记录数（为后续同步做准备）
 	unit.TotalRecords = reader.GetTotalCount()
 	unit.ProcessedRecords = 0
-	unit.Status = "pending" // 重置为pending，等待数据同步
+	unit.Status = "initialized" // 标记为已初始化（区别于pending和completed）
 	database.DB.Save(unit)
 
 	return nil
@@ -341,7 +439,7 @@ func (e *SyncEngine) createTable(ctx context.Context, taskID string, unit *model
 	// 更新总记录数（为后续同步做准备）
 	unit.TotalRecords = reader.GetTotalCount()
 	unit.ProcessedRecords = 0
-	unit.Status = "pending"
+	unit.Status = "initialized" // 标记为已初始化（区别于pending和completed）
 	database.DB.Save(unit)
 
 	return nil

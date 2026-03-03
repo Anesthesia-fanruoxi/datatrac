@@ -74,6 +74,7 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 	completedCount := 0
 	runningCount := 0
 	failedCount := 0
+	initializedCount := 0 // 已初始化的表数
 	var totalProcessed int64
 	var totalRecords int64
 	var earliestStartTime *time.Time
@@ -87,6 +88,8 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 			runningCount++
 		case "failed":
 			failedCount++
+		case "initialized":
+			initializedCount++
 		}
 
 		totalProcessed += unit.ProcessedRecords
@@ -98,6 +101,11 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 				earliestStartTime = unit.StartedAt
 			}
 		}
+	}
+
+	// 如果当前是初始化阶段，使用initializedCount作为completedCount
+	if task.CurrentStep == "initialize" {
+		completedCount = initializedCount
 	}
 
 	// 计算总体进度（基于记录数）

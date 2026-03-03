@@ -45,6 +45,32 @@ func (s *TaskLogService) GetTaskLogs(taskID string, limit int) ([]TaskLog, error
 	return logs, nil
 }
 
+// GetTaskLogsByCategory 按分类获取任务日志
+func (s *TaskLogService) GetTaskLogsByCategory(taskID string, category string, limit int) ([]TaskLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	logs, exists := s.logs[taskID]
+	if !exists {
+		return []TaskLog{}, nil
+	}
+
+	// 过滤指定分类的日志
+	var filteredLogs []TaskLog
+	for _, log := range logs {
+		if log.Category == category {
+			filteredLogs = append(filteredLogs, log)
+		}
+	}
+
+	// 限制日志数量
+	if limit > 0 && len(filteredLogs) > limit {
+		filteredLogs = filteredLogs[len(filteredLogs)-limit:]
+	}
+
+	return filteredLogs, nil
+}
+
 // AddLog 添加日志
 func (s *TaskLogService) AddLog(taskID string, level string, message string, category string) {
 	s.mu.Lock()

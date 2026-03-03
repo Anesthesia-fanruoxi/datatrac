@@ -73,9 +73,10 @@ func (pc *PageController) TaskEdit(c *gin.Context) {
 
 // TaskMonitor 任务监控页
 func (pc *PageController) TaskMonitor(c *gin.Context) {
-	// TODO: 待创建独立的 task/monitor.html 模板，当前暂用 list.html
-	c.HTML(http.StatusOK, "task/list.html", gin.H{
-		"Title":  "任务执行监控",
+	taskID := c.Param("id")
+	c.HTML(http.StatusOK, "base.html", gin.H{
+		"Title":  "任务监控",
 		"Active": "tasks",
+		"TaskID": taskID,
 	})
 }

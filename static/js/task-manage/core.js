@@ -6,43 +6,81 @@
     window.TaskManageCore = {
         currentTaskId: null,
         currentTask: null,
-        eventSource: null
+        progressEventSource: null,  // 进度SSE连接
+        logEventSource: null,        // 日志SSE连接
+        currentStep: null            // 当前连接的步骤
     };
 
     // 初始化任务监控页面
-    window.initTaskManage = function() {
-        console.log('initTaskManage 被调用');
+    window.initTaskManage = function(taskId) {
+        console.log('initTaskManage 被调用, taskId:', taskId);
         loadMonitorTasks();
+        
+        // 如果提供了taskId，自动选择该任务
+        if (taskId) {
+            setTimeout(function() {
+                console.log('自动选择任务:', taskId);
+                autoSelectTask(taskId);
+            }, 500);
+        }
     };
 
     // 清理任务监控页面
     window.cleanupTaskManage = function() {
-        closeSSE();
+        closeProgressSSE();
+        closeLogSSE();
     };
 
-    // 关闭SSE连接
-    function closeSSE() {
-        if (window.TaskManageCore.eventSource) {
-            console.log('关闭SSE连接');
-            window.TaskManageCore.eventSource.close();
-            window.TaskManageCore.eventSource = null;
+    // 关闭进度SSE连接
+    function closeProgressSSE() {
+        if (window.TaskManageCore.progressEventSource) {
+            console.log('关闭进度SSE连接');
+            window.TaskManageCore.progressEventSource.close();
+            window.TaskManageCore.progressEventSource = null;
         }
     }
-    window.TaskManageCore.closeSSE = closeSSE;
+    window.TaskManageCore.closeProgressSSE = closeProgressSSE;
 
-    // 启动SSE连接
-    function startSSE(taskId) {
-        closeSSE();
+    // 关闭日志SSE连接
+    function closeLogSSE() {
+        if (window.TaskManageCore.logEventSource) {
+            console.log('关闭日志SSE连接');
+            window.TaskManageCore.logEventSource.close();
+            window.TaskManageCore.logEventSource = null;
+        }
+    }
+    window.TaskManageCore.closeLogSSE = closeLogSSE;
+
+    // 启动进度SSE连接（按步骤）
+    function startProgressSSE(taskId, step) {
+        closeProgressSSE();
         
-        console.log('启动SSE连接:', taskId);
-        const url = `/api/v1/tasks/${taskId}/stream`;
-        window.TaskManageCore.eventSource = new EventSource(url);
+        if (!step) {
+            console.warn('未指定步骤，不启动进度SSE连接');
+            return;
+        }
+        
+        console.log('启动进度SSE连接:', taskId, '步骤:', step);
+        window.TaskManageCore.currentStep = step;
+        
+        // 根据步骤选择不同的SSE接口
+        let url;
+        if (step === 'initialize') {
+            url = `/api/v1/tasks/${taskId}/stream/initialize`;
+        } else if (step === 'sync_data') {
+            url = `/api/v1/tasks/${taskId}/stream/sync`;
+        } else {
+            console.warn('未知步骤:', step);
+            return;
+        }
+        
+        window.TaskManageCore.progressEventSource = new EventSource(url);
         
         // 监听进度事件
-        window.TaskManageCore.eventSource.addEventListener('progress', function(e) {
+        window.TaskManageCore.progressEventSource.addEventListener('progress', function(e) {
             try {
                 const progress = JSON.parse(e.data);
-                console.log('收到进度更新:', progress);
+                console.log('收到进度更新 [' + step + ']:', progress);
                 if (window.TaskManageUI && window.TaskManageUI.updateProgress) {
                     window.TaskManageUI.updateProgress(progress);
                 }
@@ -51,8 +89,28 @@
             }
         });
         
+        // 监听错误
+        window.TaskManageCore.progressEventSource.onerror = function(e) {
+            console.error('进度SSE连接错误 [' + step + ']:', e);
+        };
+        
+        // 监听连接打开
+        window.TaskManageCore.progressEventSource.onopen = function() {
+            console.log('进度SSE连接已建立 [' + step + ']');
+        };
+    }
+    window.TaskManageCore.startProgressSSE = startProgressSSE;
+
+    // 启动日志SSE连接
+    function startLogSSE(taskId) {
+        closeLogSSE();
+        
+        console.log('启动日志SSE连接:', taskId);
+        const url = `/api/v1/tasks/${taskId}/stream/logs`;
+        window.TaskManageCore.logEventSource = new EventSource(url);
+        
         // 监听日志事件
-        window.TaskManageCore.eventSource.addEventListener('log', function(e) {
+        window.TaskManageCore.logEventSource.addEventListener('log', function(e) {
             try {
                 const logs = JSON.parse(e.data);
                 console.log('收到日志更新:', logs.length, '条');
@@ -65,16 +123,16 @@
         });
         
         // 监听错误
-        window.TaskManageCore.eventSource.onerror = function(e) {
-            console.error('SSE连接错误:', e);
+        window.TaskManageCore.logEventSource.onerror = function(e) {
+            console.error('日志SSE连接错误:', e);
         };
         
         // 监听连接打开
-        window.TaskManageCore.eventSource.onopen = function() {
-            console.log('SSE连接已建立');
+        window.TaskManageCore.logEventSource.onopen = function() {
+            console.log('日志SSE连接已建立');
         };
     }
-    window.TaskManageCore.startSSE = startSSE;
+    window.TaskManageCore.startLogSSE = startLogSSE;
 
     // 加载任务列表
     async function loadMonitorTasks() {
@@ -153,24 +211,55 @@
         document.querySelectorAll('.task-item').forEach(item => {
             item.classList.remove('active');
         });
-        window.event.currentTarget.classList.add('active');
+        if (window.event && window.event.currentTarget) {
+            window.event.currentTarget.classList.add('active');
+        }
         
-        closeSSE();
+        // 断开旧的SSE连接
+        closeProgressSSE();
+        closeLogSSE();
         
+        // 加载任务详情
         if (window.TaskManageDetail && window.TaskManageDetail.loadTaskDetail) {
             await window.TaskManageDetail.loadTaskDetail(taskId);
         }
         
-        if (window.TaskManageCore.currentTask && window.TaskManageCore.currentTask.is_running) {
-            console.log('任务运行中，启动SSE连接');
-            startSSE(taskId);
-        } else {
-            console.log('任务未运行，不启动SSE连接');
-            if (window.TaskManageDetail) {
-                await window.TaskManageDetail.loadTaskProgress(taskId);
-                await window.TaskManageDetail.loadTaskLogs(taskId);
-            }
+        // 加载静态数据
+        console.log('任务已选择，等待用户点击步骤标签启动进度SSE');
+        if (window.TaskManageDetail) {
+            await window.TaskManageDetail.loadTaskProgress(taskId);
+            await window.TaskManageDetail.loadTaskLogs(taskId);
         }
     };
+    
+    // 自动选择任务（不依赖点击事件）
+    async function autoSelectTask(taskId) {
+        window.TaskManageCore.currentTaskId = taskId;
+        
+        // 高亮选中的任务
+        document.querySelectorAll('.task-item').forEach(item => {
+            item.classList.remove('active');
+            if (item.getAttribute('onclick') && item.getAttribute('onclick').includes(taskId)) {
+                item.classList.add('active');
+            }
+        });
+        
+        // 断开旧的SSE连接
+        closeProgressSSE();
+        closeLogSSE();
+        
+        // 加载任务详情
+        if (window.TaskManageDetail && window.TaskManageDetail.loadTaskDetail) {
+            await window.TaskManageDetail.loadTaskDetail(taskId);
+        }
+        
+        // 加载静态数据
+        console.log('任务已选择，等待用户点击步骤标签启动进度SSE');
+        if (window.TaskManageDetail) {
+            await window.TaskManageDetail.loadTaskProgress(taskId);
+            await window.TaskManageDetail.loadTaskLogs(taskId);
+        }
+    }
+    window.TaskManageCore.autoSelectTask = autoSelectTask;
 
 })();

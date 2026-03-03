@@ -18,7 +18,11 @@
                 await window.TaskManageDetail.loadTaskDetail(window.TaskManageCore.currentTaskId);
                 
                 console.log('任务已启动，开始SSE连接');
-                window.TaskManageCore.startSSE(window.TaskManageCore.currentTaskId);
+                // 启动日志SSE
+                window.TaskManageCore.startLogSSE(window.TaskManageCore.currentTaskId);
+                // 启动当前步骤的进度SSE
+                const currentStep = document.querySelector('.progress-step-tab.active')?.getAttribute('data-step') || 'initialize';
+                window.TaskManageCore.startProgressSSE(window.TaskManageCore.currentTaskId, currentStep);
             } else {
                 showToast('启动失败: ' + result.message, 'error');
             }
@@ -39,7 +43,9 @@
             
             if (result.code === 200) {
                 showToast('任务暂停成功', 'success');
-                window.TaskManageCore.closeSSE();
+                // 关闭所有SSE连接
+                window.TaskManageCore.closeProgressSSE();
+                window.TaskManageCore.closeLogSSE();
                 console.log('任务已暂停，关闭SSE连接');
                 await window.TaskManageCore.loadMonitorTasks();
                 await window.TaskManageDetail.loadTaskDetail(window.TaskManageCore.currentTaskId);
@@ -154,7 +160,9 @@
                 
                 if (result.code === 200) {
                     showToast('任务停止成功', 'success');
-                    window.TaskManageCore.closeSSE();
+                    // 关闭所有SSE连接
+                    window.TaskManageCore.closeProgressSSE();
+                    window.TaskManageCore.closeLogSSE();
                     console.log('任务已停止，关闭SSE连接');
                     await window.TaskManageCore.loadMonitorTasks();
                     await window.TaskManageDetail.loadTaskDetail(window.TaskManageCore.currentTaskId);

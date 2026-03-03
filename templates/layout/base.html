@@ -223,15 +223,49 @@
                     </div>
                     
                     <div class="task-detail-content">
-                        <!-- 左侧：同步进度 -->
+                        <!-- 左侧：同步进度（垂直标签页形式） -->
                         <div class="progress-panel">
                             <div class="panel-header">
                                 <i class="bi bi-graph-up me-2"></i>同步进度
                             </div>
-                            <div class="panel-body" id="progressContent">
-                                <div class="empty-state">
-                                    <i class="bi bi-inbox"></i>
-                                    <div>请选择任务查看进度</div>
+                            <div class="panel-body" style="display: flex; gap: 15px;">
+                                <!-- 左侧步骤标签 -->
+                                <div class="progress-step-tabs">
+                                    <button class="progress-step-tab active" data-step="initialize" onclick="window.TaskManageUI.switchProgressStep('initialize')">
+                                        <span class="step-icon" id="stepIcon-initialize">
+                                            <i class="bi bi-arrow-repeat spin"></i>
+                                        </span>
+                                        <span class="step-text">
+                                            <div class="step-title">步骤 1</div>
+                                            <div class="step-desc">初始化</div>
+                                        </span>
+                                    </button>
+                                    <button class="progress-step-tab" data-step="sync_data" onclick="window.TaskManageUI.switchProgressStep('sync_data')">
+                                        <span class="step-icon" id="stepIcon-sync_data">
+                                            <i class="bi bi-circle"></i>
+                                        </span>
+                                        <span class="step-text">
+                                            <div class="step-title">步骤 2</div>
+                                            <div class="step-desc">数据同步</div>
+                                        </span>
+                                    </button>
+                                </div>
+                                <!-- 右侧步骤内容 -->
+                                <div class="progress-step-content-wrapper">
+                                    <!-- 步骤1: 初始化进度 -->
+                                    <div id="progressStep-initialize" class="progress-step-content" style="display: block;">
+                                        <div class="empty-state">
+                                            <i class="bi bi-inbox"></i>
+                                            <div>请选择任务查看进度</div>
+                                        </div>
+                                    </div>
+                                    <!-- 步骤2: 数据同步进度 -->
+                                    <div id="progressStep-sync_data" class="progress-step-content" style="display: none;">
+                                        <div class="empty-state">
+                                            <i class="bi bi-inbox"></i>
+                                            <div>等待初始化完成</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -242,7 +276,8 @@
                                 <i class="bi bi-terminal me-2"></i>同步日志
                                 <div class="log-tabs">
                                     <button class="log-tab active" data-tab="all" onclick="window.TaskManageUI.filterLogsByTab('all')">所有日志</button>
-                                    <button class="log-tab" data-tab="create" onclick="window.TaskManageUI.filterLogsByTab('create')">创建日志</button>
+                                    <button class="log-tab" data-tab="initialize" onclick="window.TaskManageUI.filterLogsByTab('initialize')">初始化</button>
+                                    <button class="log-tab" data-tab="sync" onclick="window.TaskManageUI.filterLogsByTab('sync')">数据同步</button>
                                     <button class="log-tab" data-tab="complete" onclick="window.TaskManageUI.filterLogsByTab('complete')">完成日志</button>
                                 </div>
                             </div>
@@ -763,10 +798,27 @@
 
         // 页面加载时初始化
         window.onload = function() {
-            loadDataSources();
-            loadTasks();
-            // 启动自动测试（因为默认显示数据源页面）
-            startAutoTest();
+            // 检查是否有TaskID参数（从后端传入）
+            const taskID = '{{.TaskID}}';
+            
+            if (taskID && taskID !== '') {
+                // 如果有TaskID，切换到任务监控页面
+                console.log('检测到TaskID:', taskID);
+                showTab('task-manage');
+                
+                // 等待DOM加载完成后初始化任务监控
+                setTimeout(function() {
+                    if (typeof initTaskManage === 'function') {
+                        initTaskManage(taskID);
+                    }
+                }, 100);
+            } else {
+                // 否则加载默认页面
+                loadDataSources();
+                loadTasks();
+                // 启动自动测试（因为默认显示数据源页面）
+                startAutoTest();
+            }
         };
     </script>
 </body>

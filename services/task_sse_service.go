@@ -93,6 +93,155 @@ func (s *TaskSSEService) StreamTaskUpdates(taskID string, client chan SSEMessage
 	}
 }
 
+// StreamInitialize 流式推送初始化步骤更新
+func (s *TaskSSEService) StreamInitialize(taskID string, client chan SSEMessage, done <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Second) // 初始化阶段更新更频繁
+	defer ticker.Stop()
+
+	// 立即发送一次
+	s.sendInitializeUpdate(taskID, client)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			// 检查任务是否正在运行
+			var task models.SyncTask
+			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
+				// 如果任务不在运行，停止推送
+				if !task.IsRunning {
+					return
+				}
+				// 如果已经不在初始化阶段，停止推送
+				if task.CurrentStep != "initialize" && task.CurrentStep != "" {
+					return
+				}
+			}
+			s.sendInitializeUpdate(taskID, client)
+		}
+	}
+}
+
+// StreamSync 流式推送数据同步步骤更新
+func (s *TaskSSEService) StreamSync(taskID string, client chan SSEMessage, done <-chan struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// 立即发送一次
+	s.sendSyncUpdate(taskID, client)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			// 检查任务是否正在运行
+			var task models.SyncTask
+			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
+				// 如果任务不在运行，停止推送
+				if !task.IsRunning {
+					return
+				}
+				// 如果不在数据同步阶段，停止推送
+				if task.CurrentStep != "sync_data" {
+					return
+				}
+			}
+			s.sendSyncUpdate(taskID, client)
+		}
+	}
+}
+
+// StreamLogs 流式推送任务日志
+func (s *TaskSSEService) StreamLogs(taskID string, client chan SSEMessage, done <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Second) // 日志更新频繁
+	defer ticker.Stop()
+
+	// 立即发送一次
+	s.sendLogsUpdate(taskID, client)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			// 检查任务是否正在运行
+			var task models.SyncTask
+			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
+				// 如果任务不在运行，停止推送
+				if !task.IsRunning {
+					return
+				}
+			}
+			s.sendLogsUpdate(taskID, client)
+		}
+	}
+}
+
+// sendInitializeUpdate 发送初始化步骤更新（只推送进度）
+func (s *TaskSSEService) sendInitializeUpdate(taskID string, client chan SSEMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			// channel 已关闭，忽略错误
+		}
+	}()
+
+	// 获取进度
+	progress, err := s.progressService.GetTaskProgress(taskID)
+	if err == nil {
+		select {
+		case client <- SSEMessage{
+			Event: "progress",
+			Data:  progress,
+		}:
+		default:
+		}
+	}
+}
+
+// sendSyncUpdate 发送数据同步步骤更新（只推送进度）
+func (s *TaskSSEService) sendSyncUpdate(taskID string, client chan SSEMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			// channel 已关闭，忽略错误
+		}
+	}()
+
+	// 获取进度
+	progress, err := s.progressService.GetTaskProgress(taskID)
+	if err == nil {
+		select {
+		case client <- SSEMessage{
+			Event: "progress",
+			Data:  progress,
+		}:
+		default:
+		}
+	}
+}
+
+// sendLogsUpdate 发送日志更新（推送所有日志）
+func (s *TaskSSEService) sendLogsUpdate(taskID string, client chan SSEMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			// channel 已关闭，忽略错误
+		}
+	}()
+
+	// 获取所有日志
+	logs, err := s.logService.GetTaskLogs(taskID, 200)
+	if err == nil && len(logs) > 0 {
+		select {
+		case client <- SSEMessage{
+			Event: "log",
+			Data:  logs,
+		}:
+		default:
+		}
+	}
+}
+
 // sendUpdate 发送更新
 // sendUpdate 发送更新（安全发送，防止 panic）
 func (s *TaskSSEService) sendUpdate(taskID string, client chan SSEMessage) {
