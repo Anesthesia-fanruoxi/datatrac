@@ -36,7 +36,6 @@ func main() {
 	log.Printf("✅ 服务启动成功")
 	log.Printf("📍 监听地址: http://localhost%s", addr)
 	log.Printf("🏥 健康检查: http://localhost%s/health", addr)
-	log.Printf("📚 API文档: http://localhost%s/api/v1", addr)
 	log.Println("========================================")
 
 	if err := r.Run(addr); err != nil {

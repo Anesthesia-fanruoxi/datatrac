@@ -10,6 +10,7 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Server   ServerConfig   `mapstructure:"server"`
 	Security SecurityConfig `mapstructure:"security"`
+	Redis    RedisConfig    `mapstructure:"redis"`
 }
 
 // DatabaseConfig 数据库配置
@@ -32,6 +33,16 @@ type ServerConfig struct {
 // SecurityConfig 安全配置
 type SecurityConfig struct {
 	EncryptionKey string `mapstructure:"encryption_key"`
+}
+
+// RedisConfig Redis配置
+type RedisConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	PoolSize int    `mapstructure:"pool_size"`
 }
 
 var GlobalConfig *Config

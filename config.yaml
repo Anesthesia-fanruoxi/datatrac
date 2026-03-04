@@ -10,6 +10,15 @@ database:
   max_open_conns: 100
   max_idle_conns: 10
 
+# Redis配置
+redis:
+  enabled: true
+  host: 192.168.6.2
+  port: 6379
+  password: "redis"
+  db: 1
+  pool_size: 10
+
 # 服务器配置
 server:
   port: 8080
@@ -20,3 +29,4 @@ security:
   # 加密密钥（32字节，用于 AES-256-GCM 加密数据源密码）
   # 请修改为您自己的密钥！
   encryption_key: "iVVhYa1opv2B7IbVxRZr1sVHJIOqr3Sb"
+

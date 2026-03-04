@@ -150,8 +150,10 @@
             }
             
             const tasks = result.data || [];
-            const fullTasks = tasks.filter(t => t.sync_mode === 'full');
-            const incrementalTasks = tasks.filter(t => t.sync_mode === 'incremental');
+            // 只显示已配置的任务
+            const configuredTasks = tasks.filter(t => t.status === 'configured');
+            const fullTasks = configuredTasks.filter(t => t.sync_mode === 'full');
+            const incrementalTasks = configuredTasks.filter(t => t.sync_mode === 'incremental');
             
             renderTaskList('fullTaskList', fullTasks);
             renderTaskList('incrementalTaskList', incrementalTasks);

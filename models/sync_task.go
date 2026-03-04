@@ -17,6 +17,7 @@ type SyncTask struct {
 	IsRunning   bool      `gorm:"not null;default:false;index" json:"is_running"`    // 是否正在运行
 	SyncMode    string    `gorm:"size:20;not null;default:full" json:"sync_mode"`    // full/incremental
 	CurrentStep string    `gorm:"size:50;default:''" json:"current_step"`            // 当前步骤: initialize/sync_data/validate
+	QueueType   string    `gorm:"size:20;default:memory" json:"queue_type"`          // 队列类型: memory/redis
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
