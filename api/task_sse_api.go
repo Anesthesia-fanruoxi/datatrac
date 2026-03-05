@@ -200,6 +200,65 @@ func (api *TaskSSEAPI) StreamSync(c *gin.Context) {
 	}
 }
 
+// StreamIncremental 流式推送增量消费步骤更新
+func (api *TaskSSEAPI) StreamIncremental(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加客户端
+	api.sseService.AddClient(taskID, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveClient(taskID, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（只推送增量消费进度，不推送日志）
+	go api.sseService.StreamIncremental(taskID, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 // StreamLogs 流式推送任务日志
 func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
 	taskID := c.Param("id")
@@ -235,6 +294,124 @@ func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
 
 	// 启动推送协程（只推送日志）
 	go api.sseService.StreamLogs(taskID, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// StreamTaskDetail 流式推送任务详情（状态、当前步骤等）
+func (api *TaskSSEAPI) StreamTaskDetail(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加客户端
+	api.sseService.AddClient(taskID, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveClient(taskID, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（推送任务详情）
+	go api.sseService.StreamTaskDetail(taskID, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// StreamProgress 流式推送任务进度（统一接口）
+func (api *TaskSSEAPI) StreamProgress(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加客户端
+	api.sseService.AddClient(taskID, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveClient(taskID, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（推送统一进度）
+	go api.sseService.StreamProgress(taskID, client, done)
 
 	// 监听客户端断开
 	notify := c.Request.Context().Done()

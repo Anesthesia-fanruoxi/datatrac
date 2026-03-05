@@ -92,18 +92,19 @@ func (s *IncrementalSync) checkBinlogConfig() error {
 func (s *IncrementalSync) captureSnapshot() (*BinlogSnapshot, error) {
 	s.logService.Info(s.taskID, "正在捕获快照点...")
 
+	// 方法1: 先设置隔离级别，再开启事务
+	// 设置会话隔离级别为可重复读
+	_, err := s.sourceDB.Exec("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+	if err != nil {
+		return nil, fmt.Errorf("设置隔离级别失败: %v", err)
+	}
+
 	// 开启一致性快照事务
 	tx, err := s.sourceDB.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("开启事务失败: %v", err)
 	}
 	defer tx.Rollback()
-
-	// 设置隔离级别为可重复读
-	_, err = tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-	if err != nil {
-		return nil, fmt.Errorf("设置隔离级别失败: %v", err)
-	}
 
 	// 获取 Binlog 位置
 	var file string

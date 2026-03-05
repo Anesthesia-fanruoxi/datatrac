@@ -53,7 +53,7 @@ func (e *SyncEngine) handleTableExistsStrategy(writer *MySQLWriter, sourceDB *sq
 			Message:  fmt.Sprintf("创建表: %s", writer.tableName),
 			Category: "create",
 		}
-		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{createLog})
+		e.sseService.BroadcastLogUpdate(taskID, createLog)
 		return nil
 	case "truncate":
 		return writer.TruncateTable()

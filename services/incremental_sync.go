@@ -113,14 +113,19 @@ func (s *IncrementalSync) StartWithContext(ctx context.Context) error {
 	// 7. 标记全量完成
 	s.markFullSyncCompleted()
 
-	// 8. 启动增量消费
+	// 8. 更新任务步骤为增量消费
+	database.DB.Model(&models.SyncTask{}).
+		Where("id = ?", s.taskID).
+		Update("current_step", "incremental")
+
+	// 9. 启动增量消费
 	s.logService.Info(s.taskID, "全量同步完成，开始增量消费...")
 	if err := s.startIncrementalConsumer(); err != nil {
 		return fmt.Errorf("启动增量消费失败: %v", err)
 	}
 	defer s.consumer.Stop()
 
-	// 9. 持续运行，直到收到停止信号
+	// 10. 持续运行，直到收到停止信号
 	s.logService.Info(s.taskID, "增量同步运行中...")
 	<-s.ctx.Done()
 

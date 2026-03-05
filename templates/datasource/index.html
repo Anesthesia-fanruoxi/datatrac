@@ -1,0 +1,169 @@
+{{define "datasource/index.html"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - DataTrace</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/components/toast/toast.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/modules/datasource/datasource.css">
+    <link rel="stylesheet" href="/static/components/utils/common.css">
+    <link rel="stylesheet" href="/static/components/modal/modal.css">
+</head>
+<body>
+
+<!-- 左侧菜单 -->
+<div class="sidebar">
+    <div class="logo">
+        <h5><i class="bi bi-arrow-left-right"></i> DataTrace</h5>
+    </div>
+    <ul class="menu">
+        <li>
+            <a href="/datasources" class="{{if eq .Active "datasources"}}active{{end}}">
+                <i class="bi bi-database"></i> 数据源配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-config" class="{{if eq .Active "task-config"}}active{{end}}">
+                <i class="bi bi-gear"></i> 任务配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-monitor" class="{{if eq .Active "task-monitor"}}active{{end}}">
+                <i class="bi bi-activity"></i> 任务执行监控
+            </a>
+        </li>
+    </ul>
+</div>
+
+<!-- Toast 通知容器 -->
+<div class="toast-container"></div>
+
+<!-- 主内容区 -->
+<div class="main-content">
+    <div id="datasource-container">
+        <div class="datasource-header">
+            <h4><i class="bi bi-database"></i> 数据源配置</h4>
+            <button class="btn btn-primary" onclick="DataSourceCore.showAdd()">
+                <i class="bi bi-plus-circle"></i> 新建数据源
+            </button>
+        </div>
+        
+        <div class="datasource-table">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>类型</th>
+                        <th>地址</th>
+                        <th>连接状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="datasourceList">
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">
+                            <div class="spinner-border spinner-border-sm me-2"></div>
+                            加载中...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 新建/编辑数据源模态框 -->
+<div id="datasourceModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1000; backdrop-filter: blur(5px);">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:0; border-radius:15px; width:500px; max-height:80vh; overflow-y:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px 15px 0 0;">
+            <h5 id="modalTitle" style="color: white; margin: 0;">新建数据源</h5>
+        </div>
+        <div style="padding: 30px;">
+            <form id="datasourceForm">
+                <input type="hidden" id="datasourceId">
+                
+                <div class="mb-3">
+                    <label class="form-label">名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="dsName" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">类型 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="dsType" required>
+                        <option value="">请选择</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="elasticsearch">Elasticsearch</option>
+                    </select>
+                </div>
+
+                <div class="row">
+                    <div class="col-8">
+                        <div class="mb-3">
+                            <label class="form-label">主机 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="dsHost" placeholder="localhost" required>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="mb-3">
+                            <label class="form-label">端口 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="dsPort" placeholder="3306" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="dsUsername" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">密码 <span class="text-danger">*</span></label>
+                    <input type="password" class="form-control" id="dsPassword" required>
+                </div>
+
+                <div class="mb-3" id="dbNameGroup" style="display:none;">
+                    <label class="form-label">数据库名称</label>
+                    <input type="text" class="form-control" id="dsDatabase">
+                    <div class="form-text">可选，留空表示不指定数据库</div>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-secondary" onclick="DataSourceCore.closeModal()">取消</button>
+                    <button type="button" class="btn btn-info" onclick="DataSourceCore.testConnection()">
+                        <i class="bi bi-plug"></i> 测试连接
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> 保存
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+
+<!-- 通用组件 -->
+<script src="/static/components/utils/format.js"></script>
+<script src="/static/components/utils/http.js"></script>
+<script src="/static/components/toast/toast.js"></script>
+<script src="/static/components/modal/modal.js"></script>
+
+<!-- 加载数据源模块 -->
+<script src="/static/modules/datasource/sse.js"></script>
+<script src="/static/modules/datasource/datasource.js"></script>
+<script src="/static/modules/datasource/index.js"></script>
+
+<script>
+    // 初始化模块
+    DataSourceModule.init();
+</script>
+
+</body>
+</html>
+{{end}}

@@ -1,0 +1,76 @@
+/* 任务配置模块样式 */
+#task-config-container {
+    padding: 30px;
+}
+
+.task-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.task-config-table {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 新建任务模态框样式 */
+#createTaskModal .form-control,
+#createTaskModal .form-select {
+    border: 1px solid #cbd5e0;
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+#createTaskModal .form-control:focus,
+#createTaskModal .form-select:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    outline: none;
+}
+
+#createTaskModal .form-label {
+    font-weight: 500;
+    color: #2d3748;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+#createTaskModal .alert {
+    border-radius: 8px;
+    border: none;
+    background: #ebf8ff;
+    color: #2c5282;
+}
+
+#createTaskModal .btn {
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+#createTaskModal .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+}
+
+#createTaskModal .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+#createTaskModal .btn-secondary {
+    background: #e2e8f0;
+    color: #4a5568;
+    border: none;
+}
+
+#createTaskModal .btn-secondary:hover {
+    background: #cbd5e0;
+}

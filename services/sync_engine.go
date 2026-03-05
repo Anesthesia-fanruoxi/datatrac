@@ -146,7 +146,7 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unit *models.
 			Message:  completeMessage,
 			Category: "complete",
 		}
-		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{completeLog})
+		e.sseService.BroadcastLogUpdate(taskID, completeLog)
 		e.sseService.BroadcastProgressUpdate(taskID)
 
 		return nil
@@ -203,7 +203,7 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unit *models.
 			Message:  logMessage,
 			Category: "sync",
 		}
-		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{syncLog})
+		e.sseService.BroadcastLogUpdate(taskID, syncLog)
 		e.sseService.BroadcastProgressUpdate(taskID)
 	}
 
@@ -220,7 +220,7 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unit *models.
 		Message:  completeMessage,
 		Category: "complete",
 	}
-	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{completeLog})
+	e.sseService.BroadcastLogUpdate(taskID, completeLog)
 	e.sseService.BroadcastProgressUpdate(taskID)
 
 	return nil

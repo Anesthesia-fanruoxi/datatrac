@@ -202,3 +202,38 @@ func (api *DataSourceAPI) GetTables(c *gin.Context) {
 
 	common.Success(c, tables)
 }
+
+// GetDatabasesWithTables 获取数据源的所有数据库及其表列表（树形结构，仅MySQL）
+func (api *DataSourceAPI) GetDatabasesWithTables(c *gin.Context) {
+	id := c.Param("id")
+
+	// 获取数据源
+	ds, err := api.service.GetByID(id)
+	if err != nil {
+		common.NotFound(c, "数据源不存在")
+		return
+	}
+
+	if ds.Type != "mysql" {
+		common.BadRequest(c, "只有MySQL数据源支持此操作")
+		return
+	}
+
+	// 解密密码
+	crypto := utils.NewCryptoService()
+	password, err := crypto.Decrypt(ds.Password)
+	if err != nil {
+		common.Error(c, 500, "密码解密失败")
+		return
+	}
+
+	// 获取数据库和表的树形结构
+	mysqlService := services.NewMySQLMetadataService()
+	result, err := mysqlService.GetDatabasesWithTables(ds.Host, ds.Port, ds.Username, password)
+	if err != nil {
+		common.Error(c, 500, err.Error())
+		return
+	}
+
+	common.Success(c, result)
+}

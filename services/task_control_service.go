@@ -24,7 +24,8 @@ type TaskExecution struct {
 
 // TaskControlService 任务控制服务
 type TaskControlService struct {
-	executions sync.Map // map[taskID]*TaskExecution
+	executions       sync.Map // map[taskID]*TaskExecution
+	incrementalSyncs sync.Map // map[taskID]*IncrementalSync
 }
 
 var (
@@ -55,6 +56,23 @@ func (s *TaskControlService) StartTask(taskID string) error {
 
 	if task.Status != "configured" {
 		return fmt.Errorf("任务未配置，无法启动")
+	}
+
+	// 3. 根据同步模式选择执行路径
+	if task.SyncMode == "incremental" {
+		return s.startIncrementalTask(taskID)
+	}
+
+	// 默认执行全量同步
+	return s.startFullSyncTask(taskID)
+}
+
+// startFullSyncTask 启动全量同步任务
+func (s *TaskControlService) startFullSyncTask(taskID string) error {
+	// 查询任务
+	var task models.SyncTask
+	if err := database.DB.First(&task, "id = ?", taskID).Error; err != nil {
+		return fmt.Errorf("任务不存在")
 	}
 
 	// 3. 检查是否所有任务单元都已完成（允许重新启动）
@@ -125,6 +143,10 @@ func (s *TaskControlService) StartTask(taskID string) error {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
+	// 广播任务详情更新
+	sseService := NewTaskSSEService()
+	sseService.BroadcastTaskDetailUpdate(taskID)
+
 	// 10. 创建context和execution
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -149,6 +171,9 @@ func (s *TaskControlService) StartTask(taskID string) error {
 					"is_running":   false,
 					"current_step": "",
 				})
+			// 广播任务详情更新
+			sseService := NewTaskSSEService()
+			sseService.BroadcastTaskDetailUpdate(taskID)
 		}()
 
 		engine := NewSyncEngine()
@@ -177,6 +202,10 @@ func (s *TaskControlService) StartTask(taskID string) error {
 		database.DB.Model(&models.SyncTask{}).
 			Where("id = ?", taskID).
 			Update("current_step", "sync_data")
+
+		// 广播任务详情更新
+		sseService := NewTaskSSEService()
+		sseService.BroadcastTaskDetailUpdate(taskID)
 
 		// 分离有外键和无外键的表
 		var fkUnits []*models.TaskUnitRuntime     // 有外键依赖的表
@@ -271,11 +300,25 @@ func (s *TaskControlService) PauseTask(taskID string) error {
 		return fmt.Errorf("任务未在运行中")
 	}
 
-	// 3. 发送取消信号给所有Worker
-	if exec, ok := s.executions.Load(taskID); ok {
-		execution := exec.(*TaskExecution)
-		execution.Cancel()         // 发送取消信号
-		execution.WaitGroup.Wait() // 等待所有Worker退出
+	// 3. 根据同步模式处理
+	if task.SyncMode == "incremental" {
+		// 处理增量同步暂停
+		if _, ok := s.incrementalSyncs.Load(taskID); ok {
+			// 增量同步不支持暂停，只能停止
+			return fmt.Errorf("增量同步不支持暂停，请使用停止功能")
+		}
+	} else {
+		// 处理全量同步暂停
+		if exec, ok := s.executions.Load(taskID); ok {
+			execution := exec.(*TaskExecution)
+			execution.Cancel()         // 发送取消信号
+			execution.WaitGroup.Wait() // 等待所有Worker退出
+		}
+
+		// 更新运行中的任务单元状态为paused
+		database.DB.Model(&models.TaskUnitRuntime{}).
+			Where("task_id = ? AND status = ?", taskID, "running").
+			Update("status", "paused")
 	}
 
 	// 4. 更新任务状态
@@ -284,10 +327,9 @@ func (s *TaskControlService) PauseTask(taskID string) error {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
-	// 5. 更新运行中的任务单元状态为paused
-	database.DB.Model(&models.TaskUnitRuntime{}).
-		Where("task_id = ? AND status = ?", taskID, "running").
-		Update("status", "paused")
+	// 广播任务详情更新
+	sseService := NewTaskSSEService()
+	sseService.BroadcastTaskDetailUpdate(taskID)
 
 	return nil
 }
@@ -300,31 +342,51 @@ func (s *TaskControlService) StopTask(taskID string) error {
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 2. 发送取消信号给所有Worker（如果任务正在运行）
-	if task.IsRunning {
-		if exec, ok := s.executions.Load(taskID); ok {
-			execution := exec.(*TaskExecution)
-			execution.Cancel()         // 发送取消信号
-			execution.WaitGroup.Wait() // 等待所有Worker退出
+	// 2. 根据同步模式处理
+	if task.SyncMode == "incremental" {
+		// 处理增量同步停止
+		if incrementalSync, ok := s.incrementalSyncs.Load(taskID); ok {
+			// 停止增量同步
+			if err := incrementalSync.(*IncrementalSync).Stop(); err != nil {
+				return fmt.Errorf("停止增量同步失败: %v", err)
+			}
+			// 等待增量同步停止
+			time.Sleep(1 * time.Second)
+			// 清理增量同步实例
+			s.incrementalSyncs.Delete(taskID)
 		}
+	} else {
+		// 处理全量同步停止
+		if task.IsRunning {
+			if exec, ok := s.executions.Load(taskID); ok {
+				execution := exec.(*TaskExecution)
+				execution.Cancel()         // 发送取消信号
+				execution.WaitGroup.Wait() // 等待所有Worker退出
+			}
+		}
+
+		// 清除任务单元的状态，而不是删除它们
+		database.DB.Model(&models.TaskUnitRuntime{}).
+			Where("task_id = ?", taskID).
+			Updates(map[string]interface{}{
+				"status":            "pending",
+				"processed_records": 0,
+				"total_records":     0,
+				"started_at":        nil,
+				"updated_at":        time.Now(),
+			})
 	}
 
 	// 3. 更新任务状态
 	task.IsRunning = false
+	task.CurrentStep = "" // 清除当前步骤
 	if err := database.DB.Save(&task).Error; err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
-	// 4. 清除任务单元的状态，而不是删除它们
-	database.DB.Model(&models.TaskUnitRuntime{}).
-		Where("task_id = ?", taskID).
-		Updates(map[string]interface{}{
-			"status":            "pending",
-			"processed_records": 0,
-			"total_records":     0,
-			"started_at":        nil,
-			"updated_at":        time.Now(),
-		})
+	// 广播任务详情更新
+	sseService := NewTaskSSEService()
+	sseService.BroadcastTaskDetailUpdate(taskID)
 
 	return nil
 }
@@ -530,4 +592,69 @@ func (s *TaskControlService) sortUnitsByForeignKeys(task *models.SyncTask, units
 
 	logService.Info(task.ID, "外键分析完成")
 	return sortedUnits, hasForeignKeys, fkTableSet, nil
+}
+
+// startIncrementalTask 启动增量同步任务
+func (s *TaskControlService) startIncrementalTask(taskID string) error {
+	// 查询任务
+	var task models.SyncTask
+	if err := database.DB.First(&task, "id = ?", taskID).Error; err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+
+	// 清理之前的日志
+	logService := NewTaskLogService()
+	logService.mu.Lock()
+	delete(logService.logs, taskID)
+	logService.mu.Unlock()
+
+	// 创建增量同步引擎
+	incrementalSync, err := NewIncrementalSync(taskID)
+	if err != nil {
+		return fmt.Errorf("创建增量同步引擎失败: %v", err)
+	}
+
+	// 更新任务状态
+	task.IsRunning = true
+	if err := database.DB.Save(&task).Error; err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+
+	// 广播任务详情更新
+	sseService := NewTaskSSEService()
+	sseService.BroadcastTaskDetailUpdate(taskID)
+
+	// 存储增量同步实例
+	s.incrementalSyncs.Store(taskID, incrementalSync)
+
+	// 启动增量同步（异步）
+	go func() {
+		defer func() {
+			// 更新任务状态
+			database.DB.Model(&models.SyncTask{}).
+				Where("id = ?", taskID).
+				Updates(map[string]interface{}{
+					"is_running": false,
+				})
+			// 广播任务详情更新
+			sseService := NewTaskSSEService()
+			sseService.BroadcastTaskDetailUpdate(taskID)
+			// 清理增量同步实例
+			s.incrementalSyncs.Delete(taskID)
+		}()
+
+		if err := incrementalSync.Start(); err != nil {
+			logService.Error(taskID, fmt.Sprintf("增量同步失败: %v", err))
+		}
+	}()
+
+	return nil
+}
+
+// GetIncrementalSyncStatus 获取增量同步状态
+func (s *TaskControlService) GetIncrementalSyncStatus(taskID string) (map[string]interface{}, error) {
+	if incrementalSync, ok := s.incrementalSyncs.Load(taskID); ok {
+		return incrementalSync.(*IncrementalSync).GetStatus(), nil
+	}
+	return nil, fmt.Errorf("增量同步实例不存在")
 }

@@ -1,0 +1,156 @@
+{{define "task-monitor/index.html"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - DataTrace</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/components/toast/toast.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/modules/task-monitor/task-monitor.css">
+    <link rel="stylesheet" href="/static/components/utils/common.css">
+    <link rel="stylesheet" href="/static/components/modal/modal.css">
+</head>
+<body>
+
+<!-- 左侧菜单 -->
+<div class="sidebar">
+    <div class="logo">
+        <h5><i class="bi bi-arrow-left-right"></i> DataTrace</h5>
+    </div>
+    <ul class="menu">
+        <li>
+            <a href="/datasources" class="{{if eq .Active "datasources"}}active{{end}}">
+                <i class="bi bi-database"></i> 数据源配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-config" class="{{if eq .Active "task-config"}}active{{end}}">
+                <i class="bi bi-gear"></i> 任务配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-monitor" class="{{if eq .Active "task-monitor"}}active{{end}}">
+                <i class="bi bi-activity"></i> 任务执行监控
+            </a>
+        </li>
+    </ul>
+</div>
+
+<!-- Toast 通知容器 -->
+<div class="toast-container"></div>
+
+<!-- 主内容区 -->
+<div class="main-content">
+    <div class="task-manage-container">
+        <!-- 左侧任务列表 -->
+        <div class="task-list-panel">
+            <div class="task-list-header">
+                <h5><i class="bi bi-list-task me-2"></i>任务执行监控</h5>
+            </div>
+            
+            <!-- 全量同步分类 -->
+            <div class="task-category">
+                <div class="task-category-header expanded" onclick="toggleCategory('full')">
+                    <span><i class="bi bi-database me-2"></i>全量同步</span>
+                    <i class="bi bi-chevron-right"></i>
+                </div>
+                <div class="task-list expanded" id="fullTaskList">
+                    <div class="text-center text-muted p-3" style="font-size: 13px;">
+                        <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 增量同步分类 -->
+            <div class="task-category">
+                <div class="task-category-header expanded" onclick="toggleCategory('incremental')">
+                    <span><i class="bi bi-arrow-repeat me-2"></i>增量同步</span>
+                    <i class="bi bi-chevron-right"></i>
+                </div>
+                <div class="task-list expanded" id="incrementalTaskList">
+                    <div class="text-center text-muted p-3" style="font-size: 13px;">
+                        <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 右侧任务详情 -->
+        <div class="task-detail-panel">
+            <div class="task-detail-header">
+                <h5 id="taskDetailTitle"><i class="bi bi-info-circle me-2"></i>请选择任务</h5>
+                
+                <div id="taskActions" style="display: none;">
+                    <button class="btn btn-sm btn-light me-2" onclick="startTask()">
+                        <i class="bi bi-play-fill"></i> 启动
+                    </button>
+                    <button class="btn btn-sm btn-light me-2" onclick="pauseTask()">
+                        <i class="bi bi-pause-fill"></i> 暂停
+                    </button>
+                    <button class="btn btn-sm btn-light" onclick="stopTask()">
+                        <i class="bi bi-stop-fill"></i> 停止
+                    </button>
+                </div>
+            </div>
+            
+            <div class="task-detail-content">
+                <!-- 左侧：同步进度 -->
+                <div class="progress-panel">
+                    <div class="panel-header">
+                        <i class="bi bi-graph-up me-2"></i>同步进度
+                    </div>
+                    <div class="panel-body" id="progressContent">
+                        <div class="empty-state">
+                            <i class="bi bi-inbox"></i>
+                            <div>请选择任务查看进度</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 右侧：同步日志 -->
+                <div class="log-panel">
+                    <div class="panel-header">
+                        <i class="bi bi-terminal me-2"></i>同步日志
+                    </div>
+                    <div class="panel-body" id="logContent">
+                        <div class="empty-state">
+                            <i class="bi bi-inbox"></i>
+                            <div>请选择任务查看日志</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+
+<!-- 通用组件 -->
+<script src="/static/components/utils/format.js"></script>
+<script src="/static/components/utils/http.js"></script>
+<script src="/static/components/toast/toast.js"></script>
+<script src="/static/components/modal/modal.js"></script>
+
+<!-- 加载任务监控模块 -->
+<script src="/static/modules/task-monitor/task-list.js"></script>
+<script src="/static/modules/task-monitor/task-detail.js"></script>
+<script src="/static/modules/task-monitor/task-control.js"></script>
+<script src="/static/modules/task-monitor/sse/task-detail-sse.js"></script>
+<script src="/static/modules/task-monitor/sse/progress.js"></script>
+<script src="/static/modules/task-monitor/sse/logs.js"></script>
+<script src="/static/modules/task-monitor/index.js"></script>
+
+<script>
+    // 初始化模块
+    const taskId = '{{.TaskID}}';
+    TaskMonitorModule.init(taskId || null);
+</script>
+
+</body>
+</html>
+{{end}}

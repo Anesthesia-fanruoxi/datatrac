@@ -1,0 +1,416 @@
+/* 任务配置向导样式 */
+
+/* 向导模态框 */
+#wizardModal .wizard-steps {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+#wizardModal .wizard-step {
+    flex: 1;
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    background: #f8f9fa;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+
+#wizardModal .wizard-step.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+}
+
+#wizardModal .wizard-step.completed {
+    background: #e7f3ff !important;
+    color: #667eea !important;
+}
+
+#wizardModal .step-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: white;
+    color: #667eea;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+#wizardModal .wizard-step.active .step-number {
+    background: white !important;
+    color: #667eea !important;
+}
+
+#wizardModal .wizard-step.completed .step-number {
+    background: #667eea !important;
+    color: white !important;
+}
+
+#wizardModal .step-title {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* 数据源列表 - 使用最高优先级 */
+#wizardModal div.datasource-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    margin-top: 15px !important;
+    list-style: none !important;
+}
+
+#wizardModal div.datasource-item {
+    padding: 15px !important;
+    border: 2px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    transition: all 0.3s !important;
+    background: white !important;
+    display: block !important;
+    list-style: none !important;
+}
+
+#wizardModal div.datasource-item:hover {
+    border-color: #667eea !important;
+    background: #f8f9fa !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15) !important;
+}
+
+#wizardModal div.datasource-item.selected {
+    border-color: #667eea !important;
+    background: #e7f3ff !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2) !important;
+}
+
+#wizardModal div.datasource-name {
+    font-weight: 600 !important;
+    margin-bottom: 5px !important;
+    color: #2d3748 !important;
+    font-size: 15px !important;
+    display: block !important;
+}
+
+#wizardModal div.datasource-info {
+    font-size: 13px !important;
+    color: #6c757d !important;
+    display: block !important;
+}
+
+/* 数据库和表列表 */
+#wizardModal .database-list {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+#wizardModal .database-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+#wizardModal .database-header {
+    padding: 12px;
+    background: #f8f9fa;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    border-radius: 8px 8px 0 0;
+}
+
+#wizardModal .database-header:hover {
+    background: #e9ecef;
+}
+
+#wizardModal .database-header i.bi-chevron-right {
+    transition: transform 0.3s;
+}
+
+#wizardModal .table-list {
+    padding: 10px;
+}
+
+#wizardModal .table-item {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+#wizardModal .table-item:last-child {
+    border-bottom: none;
+}
+
+/* 配置区域 */
+#wizardModal .config-section {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+#wizardModal .config-section h6 {
+    margin-bottom: 10px;
+    color: #667eea;
+}
+
+#wizardModal .config-section table {
+    margin-bottom: 0;
+}
+
+#wizardModal .config-section table td:first-child {
+    color: #6c757d;
+    width: 120px;
+}
+
+
+/* 穿梭框样式 */
+#wizardModal .transfer-container {
+    display: flex;
+    gap: 20px;
+    align-items: stretch;
+    height: 100%;
+}
+
+#wizardModal .transfer-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: white;
+    overflow: hidden;
+}
+
+#wizardModal .transfer-panel-header {
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+#wizardModal .transfer-panel-header .btn-link {
+    padding: 0 8px;
+    font-size: 12px;
+    text-decoration: none;
+}
+
+#wizardModal .transfer-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+#wizardModal .transfer-buttons {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0 10px;
+}
+
+#wizardModal .transfer-buttons .btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+/* 树形结构样式 */
+#wizardModal .tree-node {
+    margin-bottom: 8px;
+}
+
+#wizardModal .tree-node-header {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: background 0.2s;
+}
+
+#wizardModal .tree-node-header:hover {
+    background: #f8f9fa;
+}
+
+#wizardModal .tree-chevron {
+    transition: transform 0.2s;
+    font-size: 12px;
+}
+
+#wizardModal .tree-chevron.rotated {
+    transform: rotate(90deg);
+}
+
+#wizardModal .tree-node-children {
+    margin-left: 20px;
+    margin-top: 5px;
+}
+
+#wizardModal .tree-node-item {
+    padding: 6px 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: background 0.2s;
+    font-size: 13px;
+}
+
+#wizardModal .tree-node-item:hover {
+    background: #f8f9fa;
+}
+
+#wizardModal .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #a0aec0;
+    padding: 40px 20px;
+}
+
+#wizardModal .empty-state i {
+    font-size: 48px;
+    margin-bottom: 10px;
+}
+
+#wizardModal .empty-state p {
+    margin: 0;
+    font-size: 14px;
+}
+
+
+/* 映射文本样式 */
+#wizardModal .mapping-text {
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+#wizardModal .mapping-text:hover {
+    background: #e7f3ff;
+    color: #667eea;
+}
+
+#wizardModal .mapping-text.modified {
+    color: #667eea;
+    font-weight: 500;
+}
+
+#wizardModal .mapping-name {
+    flex: 1;
+}
+
+#wizardModal .edit-icon {
+    cursor: pointer;
+    font-size: 14px;
+    color: #667eea;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+#wizardModal .edit-icon:hover {
+    opacity: 1;
+    transform: scale(1.2);
+}
+
+#wizardModal .bi-arrow-repeat {
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#wizardModal .bi-arrow-repeat:hover {
+    transform: rotate(180deg);
+    transition: transform 0.3s;
+}
+
+/* 批量编辑卡片样式 */
+#wizardModal .form-check-card,
+#batchEditModal .form-check-card {
+    position: relative;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: white;
+    display: flex;
+    align-items: center;
+}
+
+#wizardModal .form-check-card:hover,
+#batchEditModal .form-check-card:hover {
+    border-color: #667eea;
+    background: #f8f9fa;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+#wizardModal .form-check-card .form-check-input,
+#batchEditModal .form-check-card .form-check-input {
+    margin: 0;
+    margin-right: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+#wizardModal .form-check-card .form-check-input:checked ~ .form-check-label,
+#batchEditModal .form-check-card .form-check-input:checked ~ .form-check-label {
+    color: #667eea;
+}
+
+#wizardModal .form-check-card:has(.form-check-input:checked),
+#batchEditModal .form-check-card:has(.form-check-input:checked) {
+    border-color: #667eea;
+    background: #e7f3ff;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+}
+
+#wizardModal .form-check-card .form-check-label,
+#batchEditModal .form-check-card .form-check-label {
+    cursor: pointer;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    flex: 1;
+}
+
+#wizardModal .form-check-card .form-check-label i,
+#batchEditModal .form-check-card .form-check-label i {
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
+
+/* 步骤4 - 树状结构样式 */
+#wizardModal .tree-node-header:hover {
+    background: #e9ecef !important;
+}
+
+#wizardModal .tree-node-item {
+    display: flex;
+    align-items: center;
+    margin-top: 4px;
+}
+
+#wizardModal .tree-node-item:hover {
+    background: #f8f9fa;
+}

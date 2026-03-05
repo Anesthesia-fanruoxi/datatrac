@@ -93,6 +93,10 @@ func (s *TaskLogService) AddLog(taskID string, level string, message string, cat
 	if len(s.logs[taskID]) > 1000 {
 		s.logs[taskID] = s.logs[taskID][len(s.logs[taskID])-1000:]
 	}
+
+	// 广播新日志到SSE客户端
+	sseService := NewTaskSSEService()
+	sseService.BroadcastLogUpdate(taskID, log)
 }
 
 // formatLogTime 格式化日志时间

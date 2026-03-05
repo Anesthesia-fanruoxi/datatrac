@@ -10,15 +10,17 @@ import (
 
 // TaskMonitorAPI 任务监控API控制器
 type TaskMonitorAPI struct {
-	progressService *services.TaskProgressService
-	logService      *services.TaskLogService
+	progressService    *services.TaskProgressService
+	logService         *services.TaskLogService
+	taskControlService *services.TaskControlService
 }
 
 // NewTaskMonitorAPI 创建任务监控API控制器
 func NewTaskMonitorAPI() *TaskMonitorAPI {
 	return &TaskMonitorAPI{
-		progressService: services.NewTaskProgressService(),
-		logService:      services.NewTaskLogService(),
+		progressService:    services.NewTaskProgressService(),
+		logService:         services.NewTaskLogService(),
+		taskControlService: services.NewTaskControlService(),
 	}
 }
 
@@ -54,4 +56,17 @@ func (api *TaskMonitorAPI) GetLogs(c *gin.Context) {
 	}
 
 	common.Success(c, logs)
+}
+
+// GetIncrementalStatus 获取增量同步状态
+func (api *TaskMonitorAPI) GetIncrementalStatus(c *gin.Context) {
+	taskID := c.Param("id")
+
+	status, err := api.taskControlService.GetIncrementalSyncStatus(taskID)
+	if err != nil {
+		common.Error(c, 500, err.Error())
+		return
+	}
+
+	common.Success(c, status)
 }

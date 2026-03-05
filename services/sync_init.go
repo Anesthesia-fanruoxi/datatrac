@@ -20,7 +20,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		Message:  "========== 初始化阶段开始 ==========",
 		Category: "initialize",
 	}
-	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{initLog})
+	e.sseService.BroadcastLogUpdate(taskID, initLog)
 
 	// 更新任务步骤
 	database.DB.Model(&models.SyncTask{}).
@@ -90,7 +90,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		Message:  msg,
 		Category: "initialize",
 	}
-	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{dbLog})
+	e.sseService.BroadcastLogUpdate(taskID, dbLog)
 
 	// 5. 创建所有数据库
 	for _, group := range dbGroups {
@@ -147,7 +147,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 				Message:  msg,
 				Category: "initialize",
 			}
-			e.sseService.BroadcastLogUpdate(taskID, []TaskLog{log})
+			e.sseService.BroadcastLogUpdate(taskID, log)
 		} else {
 			msg := fmt.Sprintf("数据库已存在: %s", group.targetDB)
 			e.logService.AddLog(taskID, "info", msg, "initialize")
@@ -157,7 +157,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 				Message:  msg,
 				Category: "initialize",
 			}
-			e.sseService.BroadcastLogUpdate(taskID, []TaskLog{log})
+			e.sseService.BroadcastLogUpdate(taskID, log)
 		}
 	}
 
@@ -170,7 +170,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		Message:  msg,
 		Category: "initialize",
 	}
-	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{tableLog})
+	e.sseService.BroadcastLogUpdate(taskID, tableLog)
 
 	strategy := config.SyncConfig.TableExistsStrategy
 
@@ -185,7 +185,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 			Message:  msg,
 			Category: "initialize",
 		}
-		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{phaseLog})
+		e.sseService.BroadcastLogUpdate(taskID, phaseLog)
 		for i, unit := range units {
 			if err := e.dropTable(ctx, taskID, unit, &task, &config, sourcePassword, targetPassword); err != nil {
 				e.logService.Error(taskID, fmt.Sprintf("删除表 %s 失败: %v", unit.UnitName, err))
@@ -201,7 +201,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 					Message:  msg,
 					Category: "initialize",
 				}
-				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{progressLog})
+				e.sseService.BroadcastLogUpdate(taskID, progressLog)
 				// 推送初始化进度
 				e.sseService.BroadcastProgressUpdate(taskID)
 			}
@@ -216,7 +216,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 			Message:  msg,
 			Category: "initialize",
 		}
-		e.sseService.BroadcastLogUpdate(taskID, []TaskLog{phase2Log})
+		e.sseService.BroadcastLogUpdate(taskID, phase2Log)
 		for i := len(units) - 1; i >= 0; i-- {
 			unit := units[i]
 			if err := e.createTable(ctx, taskID, unit, &task, &config, sourcePassword, targetPassword); err != nil {
@@ -234,7 +234,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 					Message:  msg,
 					Category: "initialize",
 				}
-				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{createLog})
+				e.sseService.BroadcastLogUpdate(taskID, createLog)
 				// 推送初始化进度
 				e.sseService.BroadcastProgressUpdate(taskID)
 			}
@@ -262,7 +262,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 					Message:  msg,
 					Category: "initialize",
 				}
-				e.sseService.BroadcastLogUpdate(taskID, []TaskLog{initProgressLog})
+				e.sseService.BroadcastLogUpdate(taskID, initProgressLog)
 				// 推送初始化进度
 				e.sseService.BroadcastProgressUpdate(taskID)
 			}
@@ -278,7 +278,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, units 
 		Message:  msg,
 		Category: "initialize",
 	}
-	e.sseService.BroadcastLogUpdate(taskID, []TaskLog{completeLog})
+	e.sseService.BroadcastLogUpdate(taskID, completeLog)
 
 	return nil
 }

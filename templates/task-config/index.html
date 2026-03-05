@@ -1,0 +1,158 @@
+{{define "task-config/index.html"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - DataTrace</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/components/toast/toast.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/modules/task-config/task-config.css">
+    <link rel="stylesheet" href="/static/modules/task-config/wizard/wizard.css">
+    <link rel="stylesheet" href="/static/components/utils/common.css">
+    <link rel="stylesheet" href="/static/components/modal/modal.css">
+</head>
+<body>
+
+<!-- 左侧菜单 -->
+<div class="sidebar">
+    <div class="logo">
+        <h5><i class="bi bi-arrow-left-right"></i> DataTrace</h5>
+    </div>
+    <ul class="menu">
+        <li>
+            <a href="/datasources" class="{{if eq .Active "datasources"}}active{{end}}">
+                <i class="bi bi-database"></i> 数据源配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-config" class="{{if eq .Active "task-config"}}active{{end}}">
+                <i class="bi bi-gear"></i> 任务配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-monitor" class="{{if eq .Active "task-monitor"}}active{{end}}">
+                <i class="bi bi-activity"></i> 任务执行监控
+            </a>
+        </li>
+    </ul>
+</div>
+
+<!-- Toast 通知容器 -->
+<div class="toast-container"></div>
+
+<!-- 主内容区 -->
+<div class="main-content">
+    <div id="task-config-container">
+        <div class="task-config-header">
+            <h4><i class="bi bi-gear"></i> 任务配置</h4>
+            <button class="btn btn-primary" onclick="TaskConfigCore.showCreate()">
+                <i class="bi bi-plus-circle"></i> 新建同步任务
+            </button>
+        </div>
+        
+        <div class="task-config-table">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>任务名称</th>
+                        <th>同步方向</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="taskConfigList">
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">
+                            <div class="spinner-border spinner-border-sm me-2"></div>
+                            加载中...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 新建任务模态框 -->
+<div id="createTaskModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1000; backdrop-filter: blur(5px);">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:0; border-radius:15px; width:500px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px 15px 0 0;">
+            <h5 style="color: white; margin: 0;"><i class="bi bi-plus-circle me-2"></i>新建同步任务</h5>
+        </div>
+        <div style="padding: 30px;">
+            <form id="createTaskForm">
+                <div class="mb-3">
+                    <label class="form-label">任务名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="taskName" placeholder="例如: 生产环境数据同步" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">源类型 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="taskSourceType" required>
+                        <option value="">请选择</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="elasticsearch">Elasticsearch</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">目标类型 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="taskTargetType" required>
+                        <option value="">请选择</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="elasticsearch">Elasticsearch</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">备注</label>
+                    <textarea class="form-control" id="taskRemark" rows="3" placeholder="可选"></textarea>
+                </div>
+
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    创建后将进入配置向导，引导您完成任务配置
+                </div>
+
+                <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-secondary" onclick="TaskConfigCore.closeCreate()">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> 创建并配置
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+
+<!-- 通用组件 -->
+<script src="/static/components/utils/format.js"></script>
+<script src="/static/components/utils/http.js"></script>
+<script src="/static/components/toast/toast.js"></script>
+<script src="/static/components/modal/modal.js"></script>
+
+<!-- 加载任务配置模块 -->
+<script src="/static/modules/task-config/task-config.js"></script>
+<script src="/static/modules/task-config/wizard/wizard.js"></script>
+<script src="/static/modules/task-config/wizard/steps/step2-mapping.js"></script>
+<script src="/static/modules/task-config/wizard/steps/step1.js"></script>
+<script src="/static/modules/task-config/wizard/steps/step2.js"></script>
+<script src="/static/modules/task-config/wizard/steps/step3.js"></script>
+<script src="/static/modules/task-config/wizard/steps/step4.js"></script>
+<script src="/static/modules/task-config/index.js"></script>
+
+<script>
+    // 初始化模块
+    TaskConfigModule.init();
+</script>
+
+</body>
+</html>
+{{end}}

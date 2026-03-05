@@ -13,8 +13,8 @@ func SetupRouter() *gin.Engine {
 
 	// 使用中间件
 	r.Use(gin.Recovery())
-	// 只在 debug 模式下使用日志中间件
-	// r.Use(common.Logger())
+	// 使用 Gin 自带的日志中间件
+	r.Use(gin.Logger())
 
 	// 加载 HTML 模板
 	r.LoadHTMLGlob("templates/**/*.html")
@@ -27,13 +27,10 @@ func SetupRouter() *gin.Engine {
 
 	// 页面路由
 	r.GET("/", pageCtrl.Index)
-	r.GET("/datasources", pageCtrl.DataSourceList)
-	r.GET("/datasources/new", pageCtrl.DataSourceNew)
-	r.GET("/datasources/:id/edit", pageCtrl.DataSourceEdit)
-	r.GET("/tasks", pageCtrl.TaskList)
-	r.GET("/tasks/new", pageCtrl.TaskNew)
-	r.GET("/tasks/:id/edit", pageCtrl.TaskEdit)
-	r.GET("/tasks/:id/monitor", pageCtrl.TaskMonitor)
+	r.GET("/datasources", pageCtrl.DataSource)
+	r.GET("/task-config", pageCtrl.TaskConfig)
+	r.GET("/task-monitor", pageCtrl.TaskMonitor)
+	r.GET("/task-monitor/:id", pageCtrl.TaskMonitorWithID)
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -57,6 +54,7 @@ func SetupRouter() *gin.Engine {
 			datasources.POST("/:id/test", dsAPI.TestConnectionByID)
 			datasources.GET("/:id/databases", dsAPI.GetDatabases)
 			datasources.GET("/:id/tables", dsAPI.GetTables)
+			datasources.GET("/:id/database-tables", dsAPI.GetDatabasesWithTables) // 新增：获取完整树形结构
 			datasources.PUT("/:id", dsAPI.Update)
 			datasources.DELETE("/:id", dsAPI.Delete)
 
@@ -80,6 +78,7 @@ func SetupRouter() *gin.Engine {
 			// 任务监控
 			tasks.GET("/:id/progress", taskMonitorAPI.GetProgress)
 			tasks.GET("/:id/logs", taskMonitorAPI.GetLogs)
+			tasks.GET("/:id/incremental-status", taskMonitorAPI.GetIncrementalStatus)
 
 			// 任务控制
 			tasks.POST("/:id/start", taskControlAPI.Start)
@@ -87,10 +86,10 @@ func SetupRouter() *gin.Engine {
 			tasks.POST("/:id/stop", taskControlAPI.Stop)
 
 			// SSE流式推送
-			tasks.GET("/:id/stream", taskSSEAPI.StreamTaskUpdates)           // 兼容旧版本
-			tasks.GET("/:id/stream/initialize", taskSSEAPI.StreamInitialize) // 初始化步骤SSE
-			tasks.GET("/:id/stream/sync", taskSSEAPI.StreamSync)             // 数据同步步骤SSE
-			tasks.GET("/:id/stream/logs", taskSSEAPI.StreamLogs)             // 日志SSE
+			tasks.GET("/:id/stream", taskSSEAPI.StreamTaskUpdates)       // 兼容旧版本（已废弃）
+			tasks.GET("/:id/stream/detail", taskSSEAPI.StreamTaskDetail) // 任务详情SSE
+			tasks.GET("/:id/stream/progress", taskSSEAPI.StreamProgress) // 统一进度SSE
+			tasks.GET("/:id/stream/logs", taskSSEAPI.StreamLogs)         // 日志SSE
 		}
 	}
 

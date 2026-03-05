@@ -27,6 +27,12 @@ type TableInfo struct {
 	Comment string `json:"comment"`
 }
 
+// DatabaseWithTables 数据库及其表列表
+type DatabaseWithTables struct {
+	Database string   `json:"database"`
+	Tables   []string `json:"tables"`
+}
+
 // GetDatabases 获取数据库列表
 func (s *MySQLMetadataService) GetDatabases(host string, port int, username, password string) ([]DatabaseInfo, error) {
 	// 构建连接字符串
@@ -101,4 +107,81 @@ func (s *MySQLMetadataService) GetTables(host string, port int, username, passwo
 	}
 
 	return tables, nil
+}
+
+// GetDatabasesWithTables 获取所有数据库及其表列表（树形结构）
+func (s *MySQLMetadataService) GetDatabasesWithTables(host string, port int, username, password string) ([]DatabaseWithTables, error) {
+	// 构建连接字符串
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local",
+		username, password, host, port)
+
+	// 连接数据库
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("连接失败: %w", err)
+	}
+	defer db.Close()
+
+	// 1. 获取数据库列表（排除系统数据库）
+	dbQuery := `
+		SELECT SCHEMA_NAME
+		FROM information_schema.SCHEMATA
+		WHERE SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+		ORDER BY SCHEMA_NAME
+	`
+
+	dbRows, err := db.Query(dbQuery)
+	if err != nil {
+		return nil, fmt.Errorf("查询数据库列表失败: %w", err)
+	}
+	defer dbRows.Close()
+
+	var databaseNames []string
+	for dbRows.Next() {
+		var dbName string
+		if err := dbRows.Scan(&dbName); err != nil {
+			return nil, err
+		}
+		databaseNames = append(databaseNames, dbName)
+	}
+
+	// 2. 批量查询所有数据库的表
+	tableQuery := `
+		SELECT TABLE_SCHEMA, TABLE_NAME
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+		  AND TABLE_TYPE = 'BASE TABLE'
+		ORDER BY TABLE_SCHEMA, TABLE_NAME
+	`
+
+	tableRows, err := db.Query(tableQuery)
+	if err != nil {
+		return nil, fmt.Errorf("查询表列表失败: %w", err)
+	}
+	defer tableRows.Close()
+
+	// 3. 构建数据库和表的映射
+	dbTablesMap := make(map[string][]string)
+	for tableRows.Next() {
+		var dbName, tableName string
+		if err := tableRows.Scan(&dbName, &tableName); err != nil {
+			return nil, err
+		}
+		dbTablesMap[dbName] = append(dbTablesMap[dbName], tableName)
+	}
+
+	// 4. 构建返回结果
+	var result []DatabaseWithTables
+	for _, dbName := range databaseNames {
+		tables := dbTablesMap[dbName]
+		if tables == nil {
+			tables = []string{} // 确保返回空数组而不是 null
+		}
+		result = append(result, DatabaseWithTables{
+			Database: dbName,
+			Tables:   tables,
+		})
+	}
+
+	return result, nil
 }

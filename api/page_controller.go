@@ -14,69 +14,42 @@ func NewPageController() *PageController {
 	return &PageController{}
 }
 
-// Index 首页
+// Index 首页 - 重定向到数据源页面
 func (pc *PageController) Index(c *gin.Context) {
-	c.HTML(http.StatusOK, "base.html", nil)
+	c.Redirect(http.StatusFound, "/datasources")
 }
 
-// DataSourceList 数据源列表页
-func (pc *PageController) DataSourceList(c *gin.Context) {
-	c.HTML(http.StatusOK, "datasource/list.html", gin.H{
-		"Title":  "数据源管理",
+// DataSource 数据源页面
+func (pc *PageController) DataSource(c *gin.Context) {
+	c.HTML(http.StatusOK, "datasource/index.html", gin.H{
+		"Title":  "数据源配置",
 		"Active": "datasources",
 	})
 }
 
-// DataSourceNew 新建数据源页
-func (pc *PageController) DataSourceNew(c *gin.Context) {
-	c.HTML(http.StatusOK, "datasource/form.html", gin.H{
-		"Title":  "新建数据源",
-		"Active": "datasources",
+// TaskConfig 任务配置页面
+func (pc *PageController) TaskConfig(c *gin.Context) {
+	c.HTML(http.StatusOK, "task-config/index.html", gin.H{
+		"Title":  "任务配置",
+		"Active": "task-config",
 	})
 }
 
-// DataSourceEdit 编辑数据源页
-func (pc *PageController) DataSourceEdit(c *gin.Context) {
-	// TODO: 从数据库加载数据源信息
-	c.HTML(http.StatusOK, "datasource/form.html", gin.H{
-		"Title":  "编辑数据源",
-		"Active": "datasources",
-		// "DataSource": dataSource,
-	})
-}
-
-// TaskList 任务列表页
-func (pc *PageController) TaskList(c *gin.Context) {
-	c.HTML(http.StatusOK, "task/list.html", gin.H{
-		"Title":  "任务管理",
-		"Active": "tasks",
-	})
-}
-
-// TaskNew 新建任务页
-func (pc *PageController) TaskNew(c *gin.Context) {
-	// TODO: 实现任务配置向导页面
-	c.HTML(http.StatusOK, "task/list.html", gin.H{
-		"Title":  "新建任务",
-		"Active": "tasks",
-	})
-}
-
-// TaskEdit 编辑任务页
-func (pc *PageController) TaskEdit(c *gin.Context) {
-	// TODO: 实现任务编辑页面
-	c.HTML(http.StatusOK, "task/list.html", gin.H{
-		"Title":  "编辑任务",
-		"Active": "tasks",
-	})
-}
-
-// TaskMonitor 任务监控页
+// TaskMonitor 任务监控页面
 func (pc *PageController) TaskMonitor(c *gin.Context) {
+	c.HTML(http.StatusOK, "task-monitor/index.html", gin.H{
+		"Title":  "任务执行监控",
+		"Active": "task-monitor",
+		"TaskID": "",
+	})
+}
+
+// TaskMonitorWithID 任务监控页面（带任务ID）
+func (pc *PageController) TaskMonitorWithID(c *gin.Context) {
 	taskID := c.Param("id")
-	c.HTML(http.StatusOK, "base.html", gin.H{
-		"Title":  "任务监控",
-		"Active": "tasks",
+	c.HTML(http.StatusOK, "task-monitor/index.html", gin.H{
+		"Title":  "任务执行监控",
+		"Active": "task-monitor",
 		"TaskID": taskID,
 	})
 }

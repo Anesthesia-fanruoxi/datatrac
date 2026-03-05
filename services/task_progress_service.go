@@ -17,22 +17,25 @@ func NewTaskProgressService() *TaskProgressService {
 
 // TaskProgress 任务进度信息（简化版，减少前端渲染压力）
 type TaskProgress struct {
-	TaskID           string     `json:"task_id"`
-	TaskName         string     `json:"task_name"`
-	Status           string     `json:"status"`
-	SyncMode         string     `json:"sync_mode"`
-	CurrentStep      string     `json:"current_step"`      // 当前步骤: initialize/sync_data/validate
-	TotalTables      int        `json:"total_tables"`      // 总表数
-	CompletedTables  int        `json:"completed_tables"`  // 已完成表数
-	RunningTables    int        `json:"running_tables"`    // 运行中表数
-	FailedTables     int        `json:"failed_tables"`     // 失败表数
-	TotalRecords     int64      `json:"total_records"`     // 总记录数
-	ProcessedRecords int64      `json:"processed_records"` // 已处理记录数
-	OverallProgress  float64    `json:"overall_progress"`  // 总体进度百分比
-	SyncSpeed        int64      `json:"sync_speed"`        // 同步速度（条/秒）
-	ElapsedTime      string     `json:"elapsed_time"`      // 已用时间
-	EstimatedTime    string     `json:"estimated_time"`    // 预计剩余时间
-	StartedAt        *time.Time `json:"started_at"`        // 开始时间
+	TaskID                   string     `json:"task_id"`
+	TaskName                 string     `json:"task_name"`
+	Status                   string     `json:"status"`
+	SyncMode                 string     `json:"sync_mode"`
+	CurrentStep              string     `json:"current_step"`               // 当前步骤: initialize/sync_data/incremental
+	TotalTables              int        `json:"total_tables"`               // 总表数
+	CompletedTables          int        `json:"completed_tables"`           // 已完成表数
+	RunningTables            int        `json:"running_tables"`             // 运行中表数
+	FailedTables             int        `json:"failed_tables"`              // 失败表数
+	TotalRecords             int64      `json:"total_records"`              // 总记录数
+	ProcessedRecords         int64      `json:"processed_records"`          // 已处理记录数
+	OverallProgress          float64    `json:"overall_progress"`           // 总体进度百分比
+	SyncSpeed                int64      `json:"sync_speed"`                 // 同步速度（条/秒）
+	ElapsedTime              string     `json:"elapsed_time"`               // 已用时间
+	EstimatedTime            string     `json:"estimated_time"`             // 预计剩余时间
+	StartedAt                *time.Time `json:"started_at"`                 // 开始时间
+	IncrementalEventsTotal   int64      `json:"incremental_events_total"`   // 增量事件总数
+	IncrementalEventsApplied int64      `json:"incremental_events_applied"` // 已应用事件数
+	IncrementalLag           int        `json:"incremental_lag"`            // 增量延迟(秒)
 }
 
 // TableUnit 表单元信息（已废弃，不再使用）
@@ -138,22 +141,49 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 
 	// 构建简化的进度信息
 	progress := &TaskProgress{
-		TaskID:           taskID,
-		TaskName:         task.Name,
-		Status:           task.Status,
-		SyncMode:         task.SyncMode,
-		CurrentStep:      task.CurrentStep,
-		TotalTables:      totalTables,
-		CompletedTables:  completedCount,
-		RunningTables:    runningCount,
-		FailedTables:     failedCount,
-		TotalRecords:     totalRecords,
-		ProcessedRecords: totalProcessed,
-		OverallProgress:  overallProgress,
-		SyncSpeed:        syncSpeed,
-		ElapsedTime:      elapsedTime,
-		EstimatedTime:    estimatedTime,
-		StartedAt:        earliestStartTime,
+		TaskID:                   taskID,
+		TaskName:                 task.Name,
+		Status:                   task.Status,
+		SyncMode:                 task.SyncMode,
+		CurrentStep:              task.CurrentStep,
+		TotalTables:              totalTables,
+		CompletedTables:          completedCount,
+		RunningTables:            runningCount,
+		FailedTables:             failedCount,
+		TotalRecords:             totalRecords,
+		ProcessedRecords:         totalProcessed,
+		OverallProgress:          overallProgress,
+		SyncSpeed:                syncSpeed,
+		ElapsedTime:              elapsedTime,
+		EstimatedTime:            estimatedTime,
+		StartedAt:                earliestStartTime,
+		IncrementalEventsTotal:   0,
+		IncrementalEventsApplied: 0,
+		IncrementalLag:           0,
+	}
+
+	// 如果是增量同步模式，尝试从增量同步引擎获取统计信息
+	if task.SyncMode == "incremental" {
+		taskControlService := NewTaskControlService()
+		if status, err := taskControlService.GetIncrementalSyncStatus(taskID); err == nil {
+			if consumerStats, ok := status["consumer_stats"].(map[string]interface{}); ok {
+				var eventsProcessed int64
+				var eventsFailed int64
+
+				if val, ok := consumerStats["events_processed"].(int64); ok {
+					eventsProcessed = val
+					progress.IncrementalEventsApplied = val
+				}
+				if val, ok := consumerStats["events_failed"].(int64); ok {
+					eventsFailed = val
+				}
+				// 计算总事件数
+				progress.IncrementalEventsTotal = eventsProcessed + eventsFailed
+			}
+			// 计算增量延迟（简单估算）
+			// 这里可以添加更复杂的延迟计算逻辑
+			progress.IncrementalLag = 0 // 暂时设为0
+		}
 	}
 
 	return progress, nil
