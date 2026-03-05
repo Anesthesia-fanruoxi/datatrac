@@ -118,6 +118,9 @@ func (s *IncrementalSync) StartWithContext(ctx context.Context) error {
 		Where("id = ?", s.taskID).
 		Update("current_step", "incremental")
 
+	// 广播任务详情更新
+	s.sseService.BroadcastTaskDetailUpdate(s.taskID)
+
 	// 9. 启动增量消费
 	s.logService.Info(s.taskID, "全量同步完成，开始增量消费...")
 	if err := s.startIncrementalConsumer(); err != nil {

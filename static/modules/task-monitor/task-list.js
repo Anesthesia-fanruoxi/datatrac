@@ -51,13 +51,18 @@
         
         // 获取状态徽章
         getStatusBadge: function(task) {
+            // 1. 运行中：is_running=true
             if (task.is_running) {
                 return '<span class="badge bg-primary" style="font-size: 11px;">运行中</span>';
             }
-            if (task.status === 'idle') {
-                return '<span class="badge bg-secondary" style="font-size: 11px;">未配置</span>';
+            
+            // 2. 已完成：is_running=false 且 current_step 不为空
+            if (!task.is_running && task.current_step) {
+                return '<span class="badge bg-success" style="font-size: 11px;">已完成</span>';
             }
-            return '<span class="badge bg-info" style="font-size: 11px;">已配置</span>';
+            
+            // 3. 未运行：is_running=false 且 current_step 为空
+            return '<span class="badge bg-secondary" style="font-size: 11px;">未运行</span>';
         },
         
         // 选择任务

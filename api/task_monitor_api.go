@@ -41,15 +41,18 @@ func (api *TaskMonitorAPI) GetProgress(c *gin.Context) {
 func (api *TaskMonitorAPI) GetLogs(c *gin.Context) {
 	taskID := c.Param("id")
 
-	// 获取limit参数，默认100条
-	limit := 100
+	// 获取category参数，默认all
+	category := c.DefaultQuery("category", "all")
+
+	// 获取limit参数，默认1000条
+	limit := 1000
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 			limit = l
 		}
 	}
 
-	logs, err := api.logService.GetTaskLogs(taskID, limit)
+	logs, err := api.logService.GetTaskLogs(taskID, category, limit)
 	if err != nil {
 		common.Error(c, 500, err.Error())
 		return

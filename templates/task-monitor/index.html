@@ -113,7 +113,20 @@
                 <!-- 右侧：同步日志 -->
                 <div class="log-panel">
                     <div class="panel-header">
-                        <i class="bi bi-terminal me-2"></i>同步日志
+                        <div class="log-header-left">
+                            <i class="bi bi-terminal me-2"></i>同步日志
+                        </div>
+                        <div class="log-category-tabs">
+                            <button class="log-category-tab active" onclick="TaskMonitorDetail.switchLogCategory('all')">
+                                全部
+                            </button>
+                            <button class="log-category-tab" onclick="TaskMonitorDetail.switchLogCategory('initialize')">
+                                初始化
+                            </button>
+                            <button class="log-category-tab" onclick="TaskMonitorDetail.switchLogCategory('complete')">
+                                完成
+                            </button>
+                        </div>
                     </div>
                     <div class="panel-body" id="logContent">
                         <div class="empty-state">

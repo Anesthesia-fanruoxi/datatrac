@@ -5,6 +5,8 @@ import (
 	"datatrace/models"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
 )
@@ -129,6 +131,11 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 		return nil, fmt.Errorf("任务不存在")
 	}
 
+	// 检查任务是否正在运行
+	if task.IsRunning {
+		return nil, fmt.Errorf("任务正在运行，无法修改配置")
+	}
+
 	// 验证数据源
 	if err := s.validateDataSources(task, req.SourceID, req.TargetID); err != nil {
 		return nil, err
@@ -152,6 +159,7 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 	task.TargetID = req.TargetID
 	task.Config = string(configJSON)
 	task.Status = "configured" // 更新状态为已配置
+	task.CurrentStep = ""      // 清除当前步骤
 
 	// 从sync_config中提取sync_mode并更新到任务字段
 	if req.SyncConfig.SyncMode != "" {
@@ -162,12 +170,34 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 		return nil, fmt.Errorf("更新失败: %w", err)
 	}
 
+	// 清除旧的运行时数据
+	s.clearRuntimeData(task.ID)
+
 	// 生成任务单元配置
 	if err := s.generateTaskUnits(task); err != nil {
 		return nil, fmt.Errorf("生成任务单元失败: %w", err)
 	}
 
 	return task, nil
+}
+
+// clearRuntimeData 清除任务的运行时数据
+func (s *TaskService) clearRuntimeData(taskID string) {
+	// 1. 删除任务单元运行记录
+	database.DB.Where("task_id = ?", taskID).Delete(&models.TaskUnitRuntime{})
+
+	// 2. 删除任务进度记录（如果有独立的进度表）
+	// 注意：根据你的实现，进度可能是从TaskUnitRuntime计算的，不需要单独删除
+	// 如果有独立的进度表，取消下面的注释
+	// database.DB.Where("task_id = ?", taskID).Delete(&models.TaskProgress{})
+
+	// 3. 清除日志文件
+	logDir := filepath.Join("logs", taskID)
+	if _, err := os.Stat(logDir); err == nil {
+		// 目录存在，删除所有日志文件
+		os.RemoveAll(logDir)
+		fmt.Printf("已清除任务 %s 的日志文件\n", taskID)
+	}
 }
 
 // Delete 删除任务

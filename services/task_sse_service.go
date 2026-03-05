@@ -13,7 +13,8 @@ import (
 type TaskSSEService struct {
 	progressService *TaskProgressService
 	logService      *TaskLogService
-	clients         map[string]map[chan SSEMessage]struct{} // taskID -> clients
+	clients         map[string]map[chan SSEMessage]struct{}            // taskID -> clients (for progress and task_detail)
+	logClients      map[string]map[string]map[chan SSEMessage]struct{} // taskID -> category -> clients (for logs)
 	mu              sync.RWMutex
 }
 
@@ -36,12 +37,12 @@ func NewTaskSSEService() *TaskSSEService {
 			progressService: NewTaskProgressService(),
 			logService:      NewTaskLogService(),
 			clients:         make(map[string]map[chan SSEMessage]struct{}),
+			logClients:      make(map[string]map[string]map[chan SSEMessage]struct{}),
 		}
 	})
 	return taskSSEInstance
 }
 
-// AddClient 添加客户端
 // AddClient 添加客户端
 func (s *TaskSSEService) AddClient(taskID string, client chan SSEMessage) {
 	s.mu.Lock()
@@ -53,7 +54,6 @@ func (s *TaskSSEService) AddClient(taskID string, client chan SSEMessage) {
 	s.clients[taskID][client] = struct{}{}
 }
 
-// RemoveClient 移除客户端
 // RemoveClient 移除客户端（不关闭 channel，由调用方管理）
 func (s *TaskSSEService) RemoveClient(taskID string, client chan SSEMessage) {
 	s.mu.Lock()
@@ -63,6 +63,38 @@ func (s *TaskSSEService) RemoveClient(taskID string, client chan SSEMessage) {
 		delete(clients, client)
 		if len(clients) == 0 {
 			delete(s.clients, taskID)
+		}
+	}
+}
+
+// AddLogClient 添加日志客户端（带category）
+func (s *TaskSSEService) AddLogClient(taskID string, category string, client chan SSEMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.logClients[taskID] == nil {
+		s.logClients[taskID] = make(map[string]map[chan SSEMessage]struct{})
+	}
+	if s.logClients[taskID][category] == nil {
+		s.logClients[taskID][category] = make(map[chan SSEMessage]struct{})
+	}
+	s.logClients[taskID][category][client] = struct{}{}
+}
+
+// RemoveLogClient 移除日志客户端
+func (s *TaskSSEService) RemoveLogClient(taskID string, category string, client chan SSEMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if categories, ok := s.logClients[taskID]; ok {
+		if clients, ok := categories[category]; ok {
+			delete(clients, client)
+			if len(clients) == 0 {
+				delete(categories, category)
+			}
+		}
+		if len(categories) == 0 {
+			delete(s.logClients, taskID)
 		}
 	}
 }
@@ -183,12 +215,22 @@ func (s *TaskSSEService) StreamIncremental(taskID string, client chan SSEMessage
 	}
 }
 
-// StreamLogs 流式推送任务日志（事件驱动）
-func (s *TaskSSEService) StreamLogs(taskID string, client chan SSEMessage, done <-chan struct{}) {
-	// 立即发送一次初始数据
-	s.sendLogsUpdate(taskID, client)
+// StreamLogs 流式推送任务日志（事件驱动 + 文件监听）
+func (s *TaskSSEService) StreamLogs(taskID string, category string, client chan SSEMessage, done <-chan struct{}) {
+	// 创建日志文件监听器
+	watcher, err := NewLogFileWatcher(taskID, category, client, done)
+	if err != nil {
+		fmt.Printf("创建日志文件监听器失败: %v\n", err)
+		return
+	}
 
-	// 保持连接，等待广播或客户端断开
+	// 启动监听
+	if err := watcher.Start(); err != nil {
+		fmt.Printf("启动日志文件监听失败: %v\n", err)
+		return
+	}
+
+	// 保持连接，等待客户端断开
 	<-done
 }
 
@@ -281,8 +323,8 @@ func (s *TaskSSEService) sendLogsUpdate(taskID string, client chan SSEMessage) {
 		}
 	}()
 
-	// 获取所有日志
-	logs, err := s.logService.GetTaskLogs(taskID, 200)
+	// 获取所有日志（默认all分类）
+	logs, err := s.logService.GetTaskLogs(taskID, "all", 200)
 	if err == nil && len(logs) > 0 {
 		select {
 		case client <- SSEMessage{
@@ -371,8 +413,8 @@ func (s *TaskSSEService) sendUpdate(taskID string, client chan SSEMessage) {
 		}
 	}
 
-	// 获取日志
-	logs, err := s.logService.GetTaskLogs(taskID, 50)
+	// 获取日志（默认all分类）
+	logs, err := s.logService.GetTaskLogs(taskID, "all", 50)
 	if err == nil {
 		select {
 		case client <- SSEMessage{
@@ -467,33 +509,51 @@ func (s *TaskSSEService) BroadcastTaskDetailUpdate(taskID string) {
 	}
 }
 
-// BroadcastLogUpdate 广播日志更新
+// BroadcastLogUpdate 广播日志更新（支持category过滤）
 func (s *TaskSSEService) BroadcastLogUpdate(taskID string, log TaskLog) {
 	s.mu.RLock()
-	clients, ok := s.clients[taskID]
+	categories, ok := s.logClients[taskID]
 	s.mu.RUnlock()
 
-	if !ok || len(clients) == 0 {
+	if !ok || len(categories) == 0 {
 		return
 	}
 
-	// 向所有客户端发送单条日志
-	for client := range clients {
-		func(c chan SSEMessage) {
-			defer func() {
-				if r := recover(); r != nil {
-					// channel 已关闭，忽略错误
+	// 向订阅了对应category的客户端发送日志
+	for category, clients := range categories {
+		// 过滤：只向订阅了对应category的客户端发送
+		// all: 接收所有日志
+		// initialize: 只接收category=initialize的日志
+		// complete: 只接收category=complete的日志
+		shouldSend := false
+		if category == "all" {
+			shouldSend = true
+		} else if category == log.Category {
+			shouldSend = true
+		}
+
+		if !shouldSend {
+			continue
+		}
+
+		// 向该category的所有客户端发送日志
+		for client := range clients {
+			func(c chan SSEMessage) {
+				defer func() {
+					if r := recover(); r != nil {
+						// channel 已关闭，忽略错误
+					}
+				}()
+				select {
+				case c <- SSEMessage{
+					Event: "log",
+					Data:  []TaskLog{log}, // 包装成数组，保持前端兼容
+				}:
+				default:
+					// 客户端缓冲区满，跳过
 				}
-			}()
-			select {
-			case c <- SSEMessage{
-				Event: "log",
-				Data:  []TaskLog{log}, // 包装成数组，保持前端兼容
-			}:
-			default:
-				// 客户端缓冲区满，跳过
-			}
-		}(client)
+			}(client)
+		}
 	}
 }
 

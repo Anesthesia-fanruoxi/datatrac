@@ -8,6 +8,8 @@ import (
 	"datatrace/utils"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -92,13 +94,18 @@ func (s *TaskControlService) startFullSyncTask(taskID string) error {
 			})
 	}
 
-	// 4. 清理之前的日志，避免数据串台
-	logService := NewTaskLogService()
-	logService.mu.Lock()
-	delete(logService.logs, taskID)
-	logService.mu.Unlock()
+	// 4. 清理之前的日志文件
+	logDir := filepath.Join("logs", taskID)
+	if _, err := os.Stat(logDir); err == nil {
+		// 目录存在，删除所有日志文件
+		os.RemoveAll(logDir)
+		fmt.Printf("已清除任务 %s 的旧日志文件\n", taskID)
+	}
 
-	// 5. 解析配置获取线程数
+	// 5. 创建日志服务
+	logService := NewTaskLogService()
+
+	// 6. 解析配置获取线程数
 	var config TaskConfig
 	if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
 		return fmt.Errorf("解析任务配置失败: %w", err)
@@ -164,13 +171,27 @@ func (s *TaskControlService) startFullSyncTask(taskID string) error {
 		defer execution.WaitGroup.Done()
 		defer func() {
 			s.executions.Delete(taskID)
+
+			// 获取当前任务状态，判断是否正常完成
+			var currentTask models.SyncTask
+			database.DB.First(&currentTask, "id = ?", taskID)
+
+			// 如果任务正常完成（不是被取消或失败），设置为completed步骤
+			// 否则保持当前步骤不变
+			updateData := map[string]interface{}{
+				"is_running": false,
+			}
+
+			// 如果是正常完成（没有错误），设置completed步骤
+			if currentTask.CurrentStep == "sync_data" {
+				updateData["current_step"] = "completed"
+			}
+
 			// 更新任务状态
 			database.DB.Model(&models.SyncTask{}).
 				Where("id = ?", taskID).
-				Updates(map[string]interface{}{
-					"is_running":   false,
-					"current_step": "",
-				})
+				Updates(updateData)
+
 			// 广播任务详情更新
 			sseService := NewTaskSSEService()
 			sseService.BroadcastTaskDetailUpdate(taskID)
@@ -379,7 +400,8 @@ func (s *TaskControlService) StopTask(taskID string) error {
 
 	// 3. 更新任务状态
 	task.IsRunning = false
-	task.CurrentStep = "" // 清除当前步骤
+	// 注意：不清空current_step，保留步骤信息用于判断任务状态
+	// 只有在任务被完全重置时才清空步骤
 	if err := database.DB.Save(&task).Error; err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
@@ -602,11 +624,16 @@ func (s *TaskControlService) startIncrementalTask(taskID string) error {
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 清理之前的日志
+	// 清理之前的日志文件
+	logDir := filepath.Join("logs", taskID)
+	if _, err := os.Stat(logDir); err == nil {
+		// 目录存在，删除所有日志文件
+		os.RemoveAll(logDir)
+		fmt.Printf("已清除任务 %s 的旧日志文件\n", taskID)
+	}
+
+	// 创建日志服务
 	logService := NewTaskLogService()
-	logService.mu.Lock()
-	delete(logService.logs, taskID)
-	logService.mu.Unlock()
 
 	// 创建增量同步引擎
 	incrementalSync, err := NewIncrementalSync(taskID)

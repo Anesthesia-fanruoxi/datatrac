@@ -50,10 +50,10 @@
                 window.TaskMonitorProgressSSE.start(taskId);
             }
             
-            // 启动日志 SSE（始终连接）
+            // 启动日志 SSE（始终连接，默认all分类）
             if (window.TaskMonitorLogsSSE) {
                 console.log('启动日志 SSE');
-                window.TaskMonitorLogsSSE.start(taskId);
+                window.TaskMonitorLogsSSE.start(taskId, 'all');
             }
         },
         
@@ -71,6 +71,11 @@
             
             // 直接重新渲染进度UI（不发起HTTP请求）
             this.updateProgressUI({});
+            
+            // 刷新左侧任务列表（更新任务状态显示）
+            if (window.TaskMonitorList) {
+                window.TaskMonitorList.load();
+            }
         },
         
         // 更新任务头部
@@ -187,14 +192,14 @@
                 </div>
                 
                 <div class="progress-details mt-3">
-                    ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false)}
-                    ${this.renderProgressDetail('总体进度', (progress.overall_progress ? progress.overall_progress.toFixed(2) : 0) + '%', false)}
-                    ${this.renderProgressDetail('表进度', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize')}
-                    ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data') : ''}
-                    ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data') : ''}
-                    ${progress.elapsed_time ? this.renderProgressDetail('已用时间', progress.elapsed_time, false) : ''}
-                    ${progress.estimated_time ? this.renderProgressDetail('预计剩余', progress.estimated_time, false) : ''}
-                    ${syncMode === 'incremental' && progress.incremental_events_applied !== undefined ? this.renderProgressDetail('已应用事件', this.formatNumber(progress.incremental_events_applied), currentStep === 'incremental') : ''}
+                    ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
+                    ${this.renderProgressDetail('总体进度', (progress.overall_progress ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress || 0)}
+                    ${this.renderProgressDetail('表进度', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize', false)}
+                    ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
+                    ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
+                    ${progress.elapsed_time ? this.renderProgressDetail('已用时间', progress.elapsed_time, false, false) : ''}
+                    ${progress.estimated_time ? this.renderProgressDetail('预计剩余', progress.estimated_time, false, false) : ''}
+                    ${syncMode === 'incremental' && progress.incremental_events_applied !== undefined ? this.renderProgressDetail('已应用事件', this.formatNumber(progress.incremental_events_applied), currentStep === 'incremental', false) : ''}
                 </div>
             `;
             
@@ -227,9 +232,26 @@
             return checkIndex < currentIndex;
         },
         
-        // 渲染进度详情项（带高亮）
-        renderProgressDetail: function(label, value, highlight) {
+        // 渲染进度详情项（带高亮和进度条）
+        renderProgressDetail: function(label, value, highlight, showProgressBar, progressValue) {
             const highlightClass = highlight ? 'highlight' : '';
+            
+            // 如果需要显示进度条
+            if (showProgressBar && progressValue !== undefined) {
+                return `
+                    <div class="detail-item ${highlightClass}">
+                        <div class="detail-row">
+                            <span class="detail-label">${label}：</span>
+                            <span class="detail-value">${value}</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" style="width: ${progressValue}%"></div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 普通显示
             return `
                 <div class="detail-item ${highlightClass}">
                     <span class="detail-label">${label}：</span>
@@ -238,10 +260,12 @@
             `;
         },
         
-        // 加载任务日志
-        loadLogs: async function(taskId) {
+        // 加载任务日志（支持category参数）
+        loadLogs: async function(taskId, category) {
+            category = category || 'all';
+            
             try {
-                const result = await HttpUtils.get(`/api/v1/tasks/${taskId}/logs?limit=100`);
+                const result = await HttpUtils.get(`/api/v1/tasks/${taskId}/logs?limit=1000&category=${category}`);
                 
                 if (result.code === 200) {
                     this.updateLogsUI(result.data);
@@ -283,6 +307,30 @@
             
             // 滚动到底部
             container.scrollTop = container.scrollHeight;
+        },
+        
+        // 清空日志显示
+        clearLogs: function() {
+            const container = document.getElementById('logContent');
+            if (!container) return;
+            
+            container.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><div>加载中...</div></div>';
+        },
+        
+        // 切换日志分类
+        switchLogCategory: function(category) {
+            if (!this.currentTask) return;
+            
+            // 更新分类标签激活状态
+            document.querySelectorAll('.log-category-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+            
+            // 切换SSE连接
+            if (window.TaskMonitorLogsSSE) {
+                window.TaskMonitorLogsSSE.switchCategory(this.currentTask.id, category);
+            }
         },
         
         // 格式化日志条目

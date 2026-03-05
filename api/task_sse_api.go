@@ -263,6 +263,9 @@ func (api *TaskSSEAPI) StreamIncremental(c *gin.Context) {
 func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
 	taskID := c.Param("id")
 
+	// 获取category参数，默认all
+	category := c.DefaultQuery("category", "all")
+
 	// 设置SSE响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -272,12 +275,12 @@ func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
 	// 创建客户端通道
 	client := make(chan services.SSEMessage, 10)
 
-	// 添加客户端
-	api.sseService.AddClient(taskID, client)
+	// 添加客户端（带category）
+	api.sseService.AddLogClient(taskID, category, client)
 
 	// 确保清理资源
 	defer func() {
-		api.sseService.RemoveClient(taskID, client)
+		api.sseService.RemoveLogClient(taskID, category, client)
 		close(client)
 	}()
 
@@ -292,8 +295,8 @@ func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
 	// 创建退出信号通道
 	done := make(chan struct{})
 
-	// 启动推送协程（只推送日志）
-	go api.sseService.StreamLogs(taskID, client, done)
+	// 启动推送协程（监听文件变化）
+	go api.sseService.StreamLogs(taskID, category, client, done)
 
 	// 监听客户端断开
 	notify := c.Request.Context().Done()

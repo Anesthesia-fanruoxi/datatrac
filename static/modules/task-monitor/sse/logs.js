@@ -4,13 +4,27 @@
     
     window.TaskMonitorLogsSSE = {
         eventSource: null,
+        currentCategory: 'all',
+        currentTaskId: null,
         
-        // 启动日志 SSE 连接
-        start: function(taskId) {
+        // 启动日志 SSE 连接（支持category参数）
+        start: function(taskId, category) {
+            category = category || 'all';
+            
+            // 如果category没变，不需要重新连接
+            if (this.eventSource && this.currentTaskId === taskId && this.currentCategory === category) {
+                console.log('日志 SSE 已连接，category相同，无需重新连接');
+                return;
+            }
+            
+            // 关闭旧连接
             this.close();
             
-            console.log('启动日志 SSE 连接，任务ID:', taskId);
-            this.eventSource = new EventSource(`/api/v1/tasks/${taskId}/stream/logs`);
+            this.currentTaskId = taskId;
+            this.currentCategory = category;
+            
+            console.log('启动日志 SSE 连接，任务ID:', taskId, 'category:', category);
+            this.eventSource = new EventSource(`/api/v1/tasks/${taskId}/stream/logs?category=${category}`);
             
             // 监听日志事件
             this.eventSource.addEventListener('log', (e) => {
@@ -41,12 +55,27 @@
             };
         },
         
+        // 切换日志分类
+        switchCategory: function(taskId, category) {
+            console.log('切换日志分类:', category);
+            
+            // 清空日志显示
+            if (window.TaskMonitorDetail) {
+                window.TaskMonitorDetail.clearLogs();
+            }
+            
+            // 重新连接SSE（会自动关闭旧连接）
+            this.start(taskId, category);
+        },
+        
         // 关闭 SSE 连接
         close: function() {
             if (this.eventSource) {
                 console.log('关闭日志 SSE 连接');
                 this.eventSource.close();
                 this.eventSource = null;
+                this.currentTaskId = null;
+                this.currentCategory = 'all';
             }
         }
     };

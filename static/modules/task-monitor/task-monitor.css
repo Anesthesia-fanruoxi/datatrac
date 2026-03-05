@@ -139,6 +139,42 @@
     font-weight: 600;
     background: #f8f9fa;
     border-radius: 10px 10px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.log-header-left {
+    display: flex;
+    align-items: center;
+}
+
+/* 日志分类标签 */
+.log-category-tabs {
+    display: flex;
+    gap: 5px;
+}
+
+.log-category-tab {
+    padding: 5px 15px;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #64748b;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.log-category-tab:hover {
+    background: #f8f9fa;
+    border-color: #cbd5e1;
+}
+
+.log-category-tab.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
 }
 
 .panel-body {
@@ -350,7 +386,7 @@
 
 .detail-item {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     padding: 8px 0;
     border-bottom: 1px solid #e2e8f0;
     transition: all 0.2s ease;
@@ -358,6 +394,12 @@
 
 .detail-item:last-child {
     border-bottom: none;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
 }
 
 .detail-item.highlight {
@@ -391,4 +433,42 @@
 .detail-item.highlight .detail-value {
     color: #667eea;
     font-weight: 600;
+}
+
+/* 进度条样式 */
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+.progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
 }
