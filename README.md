@@ -56,9 +56,7 @@ datatrace/
 ├── api/                    # API处理器（待实现）
 ├── models/                 # 数据模型
 │   ├── datasource.go       # 数据源模型
-│   ├── sync_task.go        # 任务模型
-│   ├── task_unit_config.go # 任务单元配置
-│   └── task_unit_runtime.go # 任务单元运行记录
+│   └── sync_task.go        # 任务模型
 ├── services/               # 业务逻辑层（待实现）
 ├── routers/                # 路由配置
 │   └── router.go
@@ -103,10 +101,12 @@ security:
 
 系统启动时会自动创建以下表：
 
-- `data_sources` - 数据源表
-- `sync_tasks` - 同步任务表
-- `task_unit_configs` - 任务单元配置表
-- `task_unit_runtimes` - 任务单元运行记录表
+- `data_sources` - 数据源表（存储数据源连接信息）
+- `sync_tasks` - 同步任务表（存储任务基本信息和最终状态）
+
+注：任务详细配置（表映射等）存储在Redis中，运行时进度在内存中维护
+
+📖 **详细架构说明**：请查看 [重构后架构说明](./docs/architecture/重构后架构说明.md)
 
 ## 🎯 API 接口
 

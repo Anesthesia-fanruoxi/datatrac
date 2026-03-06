@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -36,6 +37,10 @@ type BinlogListener struct {
 	// 日志服务
 	logService *TaskLogService
 	taskID     string
+
+	// 表结构缓存: "database.table" -> []columnName
+	tableSchemaCache map[string][]string
+	sourceDB         *sql.DB // 源数据库连接，用于查询表结构
 }
 
 // BinlogListenerConfig 监听器配置
@@ -50,6 +55,7 @@ type BinlogListenerConfig struct {
 	Tables    map[string][]string // database -> []table
 	Queue     BinlogQueue
 	TaskID    string
+	SourceDB  *sql.DB // 源数据库连接
 }
 
 // NewBinlogListener 创建 Binlog 监听器
@@ -76,19 +82,21 @@ func NewBinlogListener(config *BinlogListenerConfig) (*BinlogListener, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &BinlogListener{
-		host:       config.Host,
-		port:       config.Port,
-		username:   config.Username,
-		password:   config.Password,
-		serverID:   config.ServerID,
-		startFile:  config.StartFile,
-		startPos:   config.StartPos,
-		tables:     tables,
-		queue:      config.Queue,
-		ctx:        ctx,
-		cancel:     cancel,
-		logService: NewTaskLogService(),
-		taskID:     config.TaskID,
+		host:             config.Host,
+		port:             config.Port,
+		username:         config.Username,
+		password:         config.Password,
+		serverID:         config.ServerID,
+		startFile:        config.StartFile,
+		startPos:         config.StartPos,
+		tables:           tables,
+		queue:            config.Queue,
+		ctx:              ctx,
+		cancel:           cancel,
+		logService:       NewTaskLogService(),
+		taskID:           config.TaskID,
+		tableSchemaCache: make(map[string][]string),
+		sourceDB:         config.SourceDB,
 	}, nil
 }
 
@@ -202,7 +210,18 @@ func (l *BinlogListener) handleInsert(ev *replication.BinlogEvent) error {
 
 	// 处理每一行
 	for _, row := range rowsEvent.Rows {
-		data := l.rowToMap(rowsEvent.Table.ColumnName, row)
+		data := l.rowToMap(database, table, rowsEvent.Table.ColumnName, row)
+
+		// 验证数据是否为空
+		if len(data) == 0 {
+			l.logService.Warning(l.taskID, fmt.Sprintf(
+				"INSERT 事件数据为空，跳过: %s.%s, 列数=%d, 行数据长度=%d",
+				database, table,
+				len(rowsEvent.Table.ColumnName),
+				len(row),
+			))
+			continue
+		}
 
 		event := &BinlogEvent{
 			Type:       "INSERT",
@@ -236,11 +255,28 @@ func (l *BinlogListener) handleUpdate(ev *replication.BinlogEvent) error {
 
 	// UPDATE 事件的 Rows 是成对出现的：[旧值, 新值, 旧值, 新值, ...]
 	for i := 0; i < len(rowsEvent.Rows); i += 2 {
+		if i+1 >= len(rowsEvent.Rows) {
+			l.logService.Warning(l.taskID, fmt.Sprintf(
+				"UPDATE 事件行数据不完整，跳过: %s.%s",
+				database, table,
+			))
+			break
+		}
+
 		oldRow := rowsEvent.Rows[i]
 		newRow := rowsEvent.Rows[i+1]
 
-		oldData := l.rowToMap(rowsEvent.Table.ColumnName, oldRow)
-		newData := l.rowToMap(rowsEvent.Table.ColumnName, newRow)
+		oldData := l.rowToMap(database, table, rowsEvent.Table.ColumnName, oldRow)
+		newData := l.rowToMap(database, table, rowsEvent.Table.ColumnName, newRow)
+
+		// 验证数据是否为空
+		if len(newData) == 0 {
+			l.logService.Warning(l.taskID, fmt.Sprintf(
+				"UPDATE 事件新数据为空，跳过: %s.%s",
+				database, table,
+			))
+			continue
+		}
 
 		event := &BinlogEvent{
 			Type:       "UPDATE",
@@ -273,7 +309,16 @@ func (l *BinlogListener) handleDelete(ev *replication.BinlogEvent) error {
 	}
 
 	for _, row := range rowsEvent.Rows {
-		data := l.rowToMap(rowsEvent.Table.ColumnName, row)
+		data := l.rowToMap(database, table, rowsEvent.Table.ColumnName, row)
+
+		// 验证数据是否为空
+		if len(data) == 0 {
+			l.logService.Warning(l.taskID, fmt.Sprintf(
+				"DELETE 事件数据为空，跳过: %s.%s",
+				database, table,
+			))
+			continue
+		}
 
 		event := &BinlogEvent{
 			Type:       "DELETE",
@@ -313,16 +358,110 @@ func (l *BinlogListener) shouldProcess(database, table string) bool {
 }
 
 // rowToMap 将行数据转换为 map
-func (l *BinlogListener) rowToMap(columns [][]byte, row []interface{}) map[string]interface{} {
+func (l *BinlogListener) rowToMap(database, table string, columns [][]byte, row []interface{}) map[string]interface{} {
 	data := make(map[string]interface{})
+
+	// 如果 Binlog 事件中没有列名，从数据库查询表结构
+	if len(columns) == 0 && len(row) > 0 {
+		columns = l.getTableColumns(database, table)
+	}
+
+	// 验证数据
+	if len(columns) == 0 {
+		l.logService.Warning(l.taskID, fmt.Sprintf(
+			"无法获取列名: %s.%s",
+			database, table,
+		))
+		return data
+	}
+
+	if len(row) == 0 {
+		l.logService.Warning(l.taskID, "行数据为空，无法转换")
+		return data
+	}
+
+	// 记录列数和行数不匹配的情况
+	if len(columns) != len(row) {
+		l.logService.Warning(l.taskID, fmt.Sprintf(
+			"列数(%d)和行数据长度(%d)不匹配: %s.%s",
+			len(columns), len(row),
+			database, table,
+		))
+	}
 
 	for i, col := range columns {
 		if i < len(row) {
-			data[string(col)] = row[i]
+			colName := string(col)
+			data[colName] = row[i]
 		}
 	}
 
 	return data
+}
+
+// getTableColumns 获取表的列名（带缓存）
+func (l *BinlogListener) getTableColumns(database, table string) [][]byte {
+	cacheKey := fmt.Sprintf("%s.%s", database, table)
+
+	// 检查缓存
+	if columns, ok := l.tableSchemaCache[cacheKey]; ok {
+		result := make([][]byte, len(columns))
+		for i, col := range columns {
+			result[i] = []byte(col)
+		}
+		return result
+	}
+
+	// 从数据库查询
+	if l.sourceDB == nil {
+		l.logService.Error(l.taskID, "源数据库连接为空，无法查询表结构")
+		return nil
+	}
+
+	query := fmt.Sprintf(
+		"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+	)
+
+	rows, err := l.sourceDB.Query(query, database, table)
+	if err != nil {
+		l.logService.Error(l.taskID, fmt.Sprintf(
+			"查询表结构失败: %s.%s, 错误: %v",
+			database, table, err,
+		))
+		return nil
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var colName string
+		if err := rows.Scan(&colName); err != nil {
+			continue
+		}
+		columns = append(columns, colName)
+	}
+
+	if len(columns) == 0 {
+		l.logService.Error(l.taskID, fmt.Sprintf(
+			"未找到表结构: %s.%s",
+			database, table,
+		))
+		return nil
+	}
+
+	// 缓存结果
+	l.tableSchemaCache[cacheKey] = columns
+
+	l.logService.Info(l.taskID, fmt.Sprintf(
+		"已缓存表结构: %s.%s (%d列)",
+		database, table, len(columns),
+	))
+
+	result := make([][]byte, len(columns))
+	for i, col := range columns {
+		result[i] = []byte(col)
+	}
+	return result
 }
 
 // Stop 停止监听

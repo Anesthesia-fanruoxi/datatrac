@@ -472,3 +472,49 @@
         transform: translateX(100%);
     }
 }
+
+
+/* 增量统计表格样式 */
+.incremental-table-container {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.incremental-table-container h6 {
+    color: #667eea;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.incremental-table-container .table {
+    background: white;
+    margin-bottom: 0;
+    font-size: 13px;
+}
+
+.incremental-table-container .table thead {
+    background: #667eea;
+    color: white;
+}
+
+.incremental-table-container .table thead th {
+    border: none;
+    padding: 10px 8px;
+    font-weight: 500;
+}
+
+.incremental-table-container .table tbody td {
+    padding: 8px;
+    vertical-align: middle;
+}
+
+.incremental-table-container .table tbody tr:hover {
+    background: #f1f5f9;
+}
+
+.incremental-table-container .badge {
+    font-size: 11px;
+    padding: 4px 8px;
+}

@@ -4,6 +4,7 @@ import (
 	"datatrace/config"
 	"datatrace/database"
 	"datatrace/routers"
+	"datatrace/services"
 	"fmt"
 	"log"
 
@@ -22,13 +23,28 @@ func main() {
 	}
 	defer database.CloseDB()
 
-	// 3. 设置 Gin 模式
+	// 3. 初始化 Redis
+	if err := database.InitRedis(); err != nil {
+		log.Printf("⚠️  初始化 Redis 失败: %v", err)
+		// Redis 失败不阻止程序启动，增量统计功能将不可用
+	} else {
+		log.Println("✅ Redis 连接成功")
+
+		// 4. 加载所有任务配置到Redis
+		configCache := services.NewConfigCacheService()
+		if err := configCache.InitAllTaskConfigs(); err != nil {
+			log.Printf("⚠️  加载任务配置到Redis失败: %v", err)
+		}
+	}
+	defer database.CloseRedis()
+
+	// 5. 设置 Gin 模式
 	gin.SetMode(config.GlobalConfig.Server.Mode)
 
-	// 4. 设置路由
+	// 6. 设置路由
 	r := routers.SetupRouter()
 
-	// 5. 启动服务器
+	// 7. 启动服务器
 	addr := fmt.Sprintf(":%d", config.GlobalConfig.Server.Port)
 	log.Println("========================================")
 	log.Println("🚀 DataTrace 数据同步系统")

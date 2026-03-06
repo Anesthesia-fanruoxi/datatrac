@@ -1,13 +1,14 @@
 package services
 
 import (
-	"context"
 	"database/sql"
 	"datatrace/database"
 	"datatrace/models"
 	"fmt"
 	"sync"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // initDatabaseConnections 初始化数据库连接
@@ -23,30 +24,35 @@ func (s *IncrementalSync) initDatabaseConnections() error {
 		return fmt.Errorf("解密目标数据库密码失败: %v", err)
 	}
 
-	// 连接源库
-	sourceDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/",
-		s.task.SourceConn.Username,
-		sourcePassword,
-		s.task.SourceConn.Host,
-		s.task.SourceConn.Port,
-	)
+	// 连接源数据库（不指定具体数据库）
+	sourceDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local",
+		s.task.SourceConn.Username, sourcePassword,
+		s.task.SourceConn.Host, s.task.SourceConn.Port)
+
 	s.sourceDB, err = sql.Open("mysql", sourceDSN)
 	if err != nil {
 		return fmt.Errorf("连接源数据库失败: %v", err)
 	}
 
-	// 连接目标库
-	targetDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/",
-		s.task.TargetConn.Username,
-		targetPassword,
-		s.task.TargetConn.Host,
-		s.task.TargetConn.Port,
-	)
+	if err := s.sourceDB.Ping(); err != nil {
+		return fmt.Errorf("源数据库连接测试失败: %v", err)
+	}
+
+	// 连接目标数据库（不指定具体数据库）
+	targetDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local",
+		s.task.TargetConn.Username, targetPassword,
+		s.task.TargetConn.Host, s.task.TargetConn.Port)
+
 	s.targetDB, err = sql.Open("mysql", targetDSN)
 	if err != nil {
 		return fmt.Errorf("连接目标数据库失败: %v", err)
 	}
 
+	if err := s.targetDB.Ping(); err != nil {
+		return fmt.Errorf("目标数据库连接测试失败: %v", err)
+	}
+
+	s.logService.Info(s.taskID, "数据库连接初始化成功")
 	return nil
 }
 
@@ -60,112 +66,82 @@ func (s *IncrementalSync) closeDatabaseConnections() {
 	}
 }
 
-// checkBinlogConfig 检查 Binlog 配置
+// checkBinlogConfig 检查源库 Binlog 配置
 func (s *IncrementalSync) checkBinlogConfig() error {
-	// 检查 Binlog 是否开启
-	var logBin string
-	err := s.sourceDB.QueryRow("SHOW VARIABLES LIKE 'log_bin'").Scan(new(string), &logBin)
-	if err != nil {
-		return fmt.Errorf("查询 log_bin 失败: %v", err)
-	}
+	s.logService.Info(s.taskID, "检查源库 Binlog 配置...")
 
-	if logBin != "ON" {
-		return fmt.Errorf("源数据库未开启 Binlog，请设置 log_bin=ON")
-	}
-
-	// 检查 Binlog 格式
+	// 检查 binlog_format
 	var binlogFormat string
-	err = s.sourceDB.QueryRow("SHOW VARIABLES LIKE 'binlog_format'").Scan(new(string), &binlogFormat)
+	err := s.sourceDB.QueryRow("SELECT @@binlog_format").Scan(&binlogFormat)
 	if err != nil {
 		return fmt.Errorf("查询 binlog_format 失败: %v", err)
 	}
 
 	if binlogFormat != "ROW" {
-		return fmt.Errorf("Binlog 格式必须为 ROW，当前为: %s", binlogFormat)
+		return fmt.Errorf("binlog_format 必须为 ROW，当前为: %s", binlogFormat)
 	}
 
-	s.logService.Info(s.taskID, "Binlog 配置检查通过")
+	// 检查 binlog_row_image
+	var binlogRowImage string
+	err = s.sourceDB.QueryRow("SELECT @@binlog_row_image").Scan(&binlogRowImage)
+	if err != nil {
+		return fmt.Errorf("查询 binlog_row_image 失败: %v", err)
+	}
+
+	if binlogRowImage != "FULL" {
+		s.logService.Warning(s.taskID, fmt.Sprintf("建议 binlog_row_image 设置为 FULL，当前为: %s", binlogRowImage))
+	}
+
+	s.logService.Info(s.taskID, fmt.Sprintf("Binlog 配置检查通过 (format=%s, row_image=%s)", binlogFormat, binlogRowImage))
 	return nil
 }
 
-// captureSnapshot 捕获快照点
+// captureSnapshot 捕获 Binlog 快照点
 func (s *IncrementalSync) captureSnapshot() (*BinlogSnapshot, error) {
-	s.logService.Info(s.taskID, "正在捕获快照点...")
+	s.logService.Info(s.taskID, "捕获 Binlog 快照点...")
 
-	// 方法1: 先设置隔离级别，再开启事务
-	// 设置会话隔离级别为可重复读
-	_, err := s.sourceDB.Exec("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-	if err != nil {
-		return nil, fmt.Errorf("设置隔离级别失败: %v", err)
-	}
-
-	// 开启一致性快照事务
-	tx, err := s.sourceDB.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("开启事务失败: %v", err)
-	}
-	defer tx.Rollback()
-
-	// 获取 Binlog 位置
 	var file string
-	var pos uint32
-	err = tx.QueryRow("SHOW MASTER STATUS").Scan(&file, &pos, new(string), new(string), new(string))
-	if err != nil {
-		return nil, fmt.Errorf("获取 Binlog 位置失败: %v", err)
-	}
+	var position uint32
+	var binlogDoDB, binlogIgnoreDB, executedGtidSet string
 
-	// 提交事务
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("提交事务失败: %v", err)
+	err := s.sourceDB.QueryRow("SHOW MASTER STATUS").Scan(
+		&file, &position, &binlogDoDB, &binlogIgnoreDB, &executedGtidSet,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("获取 MASTER STATUS 失败: %v", err)
 	}
 
 	snapshot := &BinlogSnapshot{
 		File:      file,
-		Position:  pos,
+		Position:  position,
 		Timestamp: time.Now(),
 	}
 
-	// 保存快照点到数据库
-	database.DB.Model(&models.SyncTask{}).
-		Where("id = ?", s.taskID).
-		Updates(map[string]interface{}{
-			"snapshot_binlog_file": file,
-			"snapshot_binlog_pos":  pos,
-			"updated_at":           time.Now(),
-		})
-
-	s.logService.Info(s.taskID, fmt.Sprintf("快照点捕获成功: %s:%d", file, pos))
+	s.logService.Info(s.taskID, fmt.Sprintf("快照点: %s:%d", snapshot.File, snapshot.Position))
 	return snapshot, nil
 }
 
-// createQueue 创建队列
+// createQueue 创建 Binlog 队列
 func (s *IncrementalSync) createQueue() error {
+	s.logService.Info(s.taskID, "创建 Binlog 队列...")
+
 	queueType := s.task.QueueType
 	if queueType == "" {
 		queueType = "memory" // 默认使用内存队列
 	}
 
-	s.logService.Info(s.taskID, fmt.Sprintf("创建队列，类型: %s", queueType))
-
-	switch queueType {
-	case "memory":
-		s.queue = NewMemoryQueue(s.config.SyncConfig.BatchSize * 10)
-
-	case "redis":
-		// 使用全局 Redis 客户端
-		if database.RedisClient == nil {
-			return fmt.Errorf("Redis 未启用，请在配置文件中启用 Redis")
-		}
-		queue, err := NewRedisQueue(database.RedisClient, s.taskID, "worker-1")
-		if err != nil {
-			return fmt.Errorf("创建 Redis 队列失败: %v", err)
-		}
-		s.queue = queue
-
-	default:
-		return fmt.Errorf("不支持的队列类型: %s", queueType)
+	var err error
+	if queueType == "redis" {
+		s.queue, err = NewRedisQueue(database.RedisClient, s.taskID, "worker-1")
+	} else {
+		s.queue = NewMemoryQueue(10000) // 缓冲区大小10000
 	}
 
+	if err != nil {
+		return fmt.Errorf("创建队列失败: %w", err)
+	}
+
+	s.logService.Info(s.taskID, fmt.Sprintf("队列创建成功 (类型: %s)", queueType))
 	return nil
 }
 
@@ -179,324 +155,257 @@ func (s *IncrementalSync) startBinlogListener(snapshot *BinlogSnapshot) error {
 		return fmt.Errorf("解密源数据库密码失败: %v", err)
 	}
 
-	// 构建表过滤配置
-	tables := make(map[string][]string)
-	for _, dbSelection := range s.config.SelectedDatabases {
-		sourceDB := dbSelection.SourceDatabase
-		if sourceDB == "" {
-			sourceDB = dbSelection.Database
-		}
+	// 提取需要监听的数据库和表
+	tableFilters := make(map[string][]string)
 
-		if tables[sourceDB] == nil {
-			tables[sourceDB] = []string{}
+	for _, dbSel := range s.config.SelectedDatabases {
+		sourceDB := dbSel.SourceDatabase
+		var tables []string
+		for _, tbl := range dbSel.Tables {
+			tables = append(tables, tbl.SourceTable)
 		}
-
-		for _, tableConfig := range dbSelection.Tables {
-			tables[sourceDB] = append(tables[sourceDB], tableConfig.SourceTable)
-		}
+		tableFilters[sourceDB] = tables
 	}
 
-	// 创建监听器
-	listenerConfig := &BinlogListenerConfig{
+	// 创建监听器配置
+	config := &BinlogListenerConfig{
 		Host:      s.task.SourceConn.Host,
 		Port:      s.task.SourceConn.Port,
 		Username:  s.task.SourceConn.Username,
 		Password:  sourcePassword,
-		ServerID:  100, // 可以配置化
+		ServerID:  100,
 		StartFile: snapshot.File,
 		StartPos:  snapshot.Position,
-		Tables:    tables,
+		Tables:    tableFilters,
 		Queue:     s.queue,
 		TaskID:    s.taskID,
+		SourceDB:  s.sourceDB,
 	}
 
-	listener, err := NewBinlogListener(listenerConfig)
+	// 创建监听器
+	s.listener, err = NewBinlogListener(config)
 	if err != nil {
-		return fmt.Errorf("创建 Binlog 监听器失败: %v", err)
+		return fmt.Errorf("创建监听器失败: %v", err)
 	}
-
-	s.listener = listener
 
 	// 启动监听
-	if err := listener.Start(); err != nil {
-		return fmt.Errorf("启动 Binlog 监听器失败: %v", err)
+	if err := s.listener.Start(); err != nil {
+		return fmt.Errorf("启动监听器失败: %v", err)
 	}
 
-	s.logService.Info(s.taskID, "Binlog 监听器已启动")
+	s.logService.Info(s.taskID, "Binlog 监听器启动成功")
 	return nil
 }
 
-// executeFullSync 执行全量同步
+// executeFullSync 执行全量同步（复用全量同步逻辑）
 func (s *IncrementalSync) executeFullSync() error {
-	s.logService.Info(s.taskID, "开始执行全量同步阶段...")
+	s.logService.Info(s.taskID, "========== 开始全量同步阶段 ==========")
 
-	// 1. 初始化任务单元
-	if err := s.initTaskUnits(); err != nil {
-		return fmt.Errorf("初始化任务单元失败: %v", err)
+	// 1. 从Redis获取配置
+	configCache := NewConfigCacheService()
+	config, err := configCache.GetTaskConfigWithFallback(s.taskID)
+	if err != nil {
+		return fmt.Errorf("获取任务配置失败: %v", err)
 	}
 
-	// 2. 执行初始化阶段（创建数据库和表结构）
-	if err := s.executeInitialize(); err != nil {
-		return fmt.Errorf("初始化阶段失败: %v", err)
+	threadCount := config.SyncConfig.ThreadCount
+	if threadCount <= 0 {
+		threadCount = 1
 	}
 
-	// 3. 执行数据同步阶段
-	if err := s.executeSyncData(); err != nil {
-		return fmt.Errorf("数据同步阶段失败: %v", err)
+	// 2. 生成任务单元列表
+	var unitNames []string
+	for _, db := range config.SelectedDatabases {
+		for _, tableConfig := range db.Tables {
+			targetDatabase := db.Database
+			targetTable := tableConfig.TargetTable
+			if targetTable == "" {
+				targetTable = tableConfig.SourceTable
+			}
+			unitName := fmt.Sprintf("%s.%s", targetDatabase, targetTable)
+			unitNames = append(unitNames, unitName)
+		}
 	}
 
-	s.logService.Info(s.taskID, "全量同步阶段完成")
-	return nil
-}
+	if len(unitNames) == 0 {
+		return fmt.Errorf("没有待处理的任务单元")
+	}
 
-// executeInitialize 执行初始化阶段（创建数据库和表结构）
-func (s *IncrementalSync) executeInitialize() error {
-	s.logService.Info(s.taskID, "开始初始化阶段...")
+	// 3. 初始化内存进度
+	progressManager := GetProgressManager()
+	progressManager.InitTask(s.taskID, unitNames)
 
-	// 1. 更新任务步骤
+	// 4. 外键分析和排序
+	s.logService.Info(s.taskID, "开始分析表的外键依赖关系...")
+
+	fkSorter := NewTaskForeignKeySorter()
+	sortedUnitNames, hasForeignKeys, fkTableSet, err := fkSorter.SortUnitsByForeignKeys(s.task, unitNames, config)
+	if err != nil {
+		s.logService.Error(s.taskID, fmt.Sprintf("外键分析失败: %v", err))
+		return fmt.Errorf("外键分析失败: %w", err)
+	}
+
+	if hasForeignKeys {
+		s.logService.Info(s.taskID, "检测到外键依赖,将按依赖顺序初始化")
+	} else {
+		s.logService.Info(s.taskID, "未检测到外键依赖")
+	}
+
+	// 5. 更新任务步骤
 	database.DB.Model(&models.SyncTask{}).
 		Where("id = ?", s.taskID).
 		Update("current_step", "initialize")
+	progressManager.UpdateTaskStep(s.taskID, "initialize")
 
-	// 2. 查询所有待初始化的单元
-	var units []*models.TaskUnitRuntime
-	database.DB.Where("task_id = ? AND status = ?", s.taskID, "pending").Find(&units)
+	// 广播任务详情更新
+	s.sseService.BroadcastTaskDetailUpdate(s.taskID)
 
-	if len(units) == 0 {
-		s.logService.Info(s.taskID, "没有需要初始化的表")
-		return nil
-	}
-
-	// 3. 创建同步引擎
+	// 6. 创建同步引擎
 	engine := NewSyncEngine()
 
-	// 4. 创建 context
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
-
-	// 5. 执行初始化
-	if err := engine.InitializeWorker(ctx, s.taskID, units); err != nil {
-		return fmt.Errorf("初始化失败: %v", err)
+	// 7. 初始化阶段
+	s.logService.Info(s.taskID, "步骤 1/2: 初始化阶段")
+	if err := engine.InitializeWorker(s.ctx, s.taskID, sortedUnitNames); err != nil {
+		s.logService.Error(s.taskID, fmt.Sprintf("初始化阶段失败: %v", err))
+		return fmt.Errorf("初始化阶段失败: %v", err)
 	}
 
-	s.logService.Info(s.taskID, "初始化阶段完成")
-	return nil
-}
-
-// initTaskUnits 初始化任务单元（从 TaskControlService 复制）
-func (s *IncrementalSync) initTaskUnits() error {
-	s.logService.Info(s.taskID, "初始化任务单元...")
-
-	// 1. 删除旧的任务单元
-	database.DB.Where("task_id = ?", s.taskID).Delete(&models.TaskUnitRuntime{})
-	database.DB.Where("task_id = ?", s.taskID).Delete(&models.TaskUnitConfig{})
-
-	// 2. 创建任务单元
-	for _, dbSelection := range s.config.SelectedDatabases {
-		sourceDB := dbSelection.SourceDatabase
-		if sourceDB == "" {
-			sourceDB = dbSelection.Database
-		}
-
-		for _, tableConfig := range dbSelection.Tables {
-			unitName := fmt.Sprintf("%s.%s", sourceDB, tableConfig.SourceTable)
-
-			// 创建配置单元
-			configUnit := &models.TaskUnitConfig{
-				TaskID:   s.taskID,
-				UnitName: unitName,
-				UnitType: "table",
-			}
-			database.DB.Create(configUnit)
-
-			// 创建运行时单元
-			runtimeUnit := &models.TaskUnitRuntime{
-				TaskID:           s.taskID,
-				UnitName:         unitName,
-				Status:           "pending",
-				TotalRecords:     0,
-				ProcessedRecords: 0,
-			}
-			database.DB.Create(runtimeUnit)
-		}
+	// 检查是否被取消
+	select {
+	case <-s.ctx.Done():
+		s.logService.Info(s.taskID, "任务被取消")
+		return fmt.Errorf("任务被取消")
+	default:
 	}
 
-	s.logService.Info(s.taskID, "任务单元初始化完成")
-	return nil
-}
+	// 8. 数据同步阶段
+	s.logService.Info(s.taskID, "步骤 2/2: 数据同步阶段")
 
-// executeSyncData 执行数据同步（从 TaskControlService 复制并简化）
-func (s *IncrementalSync) executeSyncData() error {
-	s.logService.Info(s.taskID, "开始数据同步阶段...")
-
-	// 1. 更新任务步骤
 	database.DB.Model(&models.SyncTask{}).
 		Where("id = ?", s.taskID).
 		Update("current_step", "sync_data")
+	progressManager.UpdateTaskStep(s.taskID, "sync_data")
 
-	// 2. 查询所有待同步的单元
-	var units []models.TaskUnitRuntime
-	database.DB.Where("task_id = ? AND status = ?", s.taskID, "initialized").Find(&units)
+	s.sseService.BroadcastTaskDetailUpdate(s.taskID)
 
-	if len(units) == 0 {
-		s.logService.Info(s.taskID, "没有需要同步的表")
-		return nil
-	}
+	// 分离有外键和无外键的表
+	var fkUnitNames []string
+	var normalUnitNames []string
 
-	// 3. 外键排序
-	sortedUnits, hasForeignKeys, _, err := s.sortUnitsByForeignKeys(units)
-	if err != nil {
-		s.logService.Warning(s.taskID, fmt.Sprintf("外键排序失败，使用原顺序: %v", err))
-		sortedUnits = make([]*models.TaskUnitRuntime, len(units))
-		for i := range units {
-			sortedUnits[i] = &units[i]
-		}
-		hasForeignKeys = false
-	}
-
-	// 4. 创建任务队列
-	taskQueue := make(chan *models.TaskUnitRuntime, len(sortedUnits))
-
-	// 5. 创建 context
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
-
-	// 6. 启动 Worker 池
-	var wg sync.WaitGroup
-	threadCount := s.config.SyncConfig.ThreadCount
-	if threadCount <= 0 {
-		threadCount = 4
-	}
-
-	engine := NewSyncEngine()
-
-	// 如果有外键，启动外键 Worker
 	if hasForeignKeys {
-		wg.Add(1)
+		for _, unitName := range sortedUnitNames {
+			if fkTableSet[unitName] {
+				fkUnitNames = append(fkUnitNames, unitName)
+			} else {
+				normalUnitNames = append(normalUnitNames, unitName)
+			}
+		}
+
+		// 反转外键表顺序
+		for i, j := 0, len(fkUnitNames)-1; i < j; i, j = i+1, j-1 {
+			fkUnitNames[i], fkUnitNames[j] = fkUnitNames[j], fkUnitNames[i]
+		}
+
+		s.logService.Info(s.taskID, fmt.Sprintf("外键表: %d 个（串行）, 普通表: %d 个（并发）", len(fkUnitNames), len(normalUnitNames)))
+	} else {
+		normalUnitNames = sortedUnitNames
+	}
+
+	// 创建队列
+	fkQueue := make(chan string, len(fkUnitNames))
+	normalQueue := make(chan string, len(normalUnitNames))
+
+	for _, unitName := range fkUnitNames {
+		fkQueue <- unitName
+	}
+	close(fkQueue)
+
+	for _, unitName := range normalUnitNames {
+		normalQueue <- unitName
+	}
+	close(normalQueue)
+
+	var syncWg sync.WaitGroup
+
+	// 外键Worker
+	if len(fkUnitNames) > 0 {
+		syncWg.Add(1)
 		go func() {
-			defer wg.Done()
-			engine.Worker(ctx, s.taskID, taskQueue, -1)
+			defer syncWg.Done()
+			s.logService.Info(s.taskID, "外键Worker 启动")
+			engine.Worker(s.ctx, s.taskID, fkQueue, -1)
+			s.logService.Info(s.taskID, "外键Worker 完成")
 		}()
 	}
 
-	// 启动普通 Worker
+	// 普通Worker池
 	for i := 0; i < threadCount; i++ {
-		wg.Add(1)
+		syncWg.Add(1)
 		go func(workerID int) {
-			defer wg.Done()
-			engine.Worker(ctx, s.taskID, taskQueue, workerID)
+			defer syncWg.Done()
+			s.logService.Info(s.taskID, fmt.Sprintf("Worker %d 启动", workerID))
+			engine.Worker(s.ctx, s.taskID, normalQueue, workerID)
+			s.logService.Info(s.taskID, fmt.Sprintf("Worker %d 完成", workerID))
 		}(i)
 	}
 
-	// 7. 分发任务
-	for _, unit := range sortedUnits {
-		taskQueue <- unit
-	}
-	close(taskQueue)
+	syncWg.Wait()
 
-	// 8. 等待完成
-	wg.Wait()
+	// 9. 清空内存进度
+	progressManager.ClearTask(s.taskID)
 
-	s.logService.Info(s.taskID, "数据同步阶段完成")
+	s.logService.Info(s.taskID, "========== 全量同步阶段完成 ==========")
 	return nil
-}
-
-// sortUnitsByForeignKeys 外键排序（简化版）
-func (s *IncrementalSync) sortUnitsByForeignKeys(units []models.TaskUnitRuntime) ([]*models.TaskUnitRuntime, bool, map[string]bool, error) {
-	// 解析数据库和表名
-	tablesByDB := make(map[string][]string)
-	unitMap := make(map[string]*models.TaskUnitRuntime)
-
-	for i := range units {
-		unit := &units[i]
-		parts := splitUnitName(unit.UnitName)
-		if len(parts) != 2 {
-			continue
-		}
-		db, table := parts[0], parts[1]
-		tablesByDB[db] = append(tablesByDB[db], table)
-		unitMap[unit.UnitName] = unit
-	}
-
-	// 对每个数据库进行外键排序
-	sortedUnits := make([]*models.TaskUnitRuntime, 0, len(units))
-	hasForeignKeys := false
-	fkTables := make(map[string]bool)
-
-	for db, tables := range tablesByDB {
-		sorted, hasFk, fkMap, err := SortTablesForDropWithFKList(s.sourceDB, db, tables)
-		if err != nil {
-			return nil, false, nil, err
-		}
-
-		if hasFk {
-			hasForeignKeys = true
-			for table := range fkMap {
-				fkTables[fmt.Sprintf("%s.%s", db, table)] = true
-			}
-		}
-
-		for _, table := range sorted {
-			unitName := fmt.Sprintf("%s.%s", db, table)
-			if unit, ok := unitMap[unitName]; ok {
-				sortedUnits = append(sortedUnits, unit)
-			}
-		}
-	}
-
-	return sortedUnits, hasForeignKeys, fkTables, nil
-}
-
-// markFullSyncCompleted 标记全量同步完成
-func (s *IncrementalSync) markFullSyncCompleted() {
-	database.DB.Model(&models.SyncTask{}).
-		Where("id = ?", s.taskID).
-		Updates(map[string]interface{}{
-			"full_sync_completed": true,
-			"updated_at":          time.Now(),
-		})
-
-	s.logService.Info(s.taskID, "全量同步已完成，标记已更新")
 }
 
 // startIncrementalConsumer 启动增量消费
 func (s *IncrementalSync) startIncrementalConsumer() error {
-	s.logService.Info(s.taskID, "启动增量消费引擎...")
+	s.logService.Info(s.taskID, "启动增量消费...")
 
-	// 创建消费者
+	// 解密密码
+	targetPassword, err := s.dsService.crypto.Decrypt(s.task.TargetConn.Password)
+	if err != nil {
+		return fmt.Errorf("解密目标数据库密码失败: %v", err)
+	}
+
+	// 连接目标数据库（不指定具体数据库）
+	targetDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local",
+		s.task.TargetConn.Username, targetPassword,
+		s.task.TargetConn.Host, s.task.TargetConn.Port)
+
+	targetDB, err := sql.Open("mysql", targetDSN)
+	if err != nil {
+		return fmt.Errorf("连接目标数据库失败: %v", err)
+	}
+
+	if err := targetDB.Ping(); err != nil {
+		return fmt.Errorf("目标数据库连接测试失败: %v", err)
+	}
+
+	// 创建消费者配置
 	consumerConfig := &IncrementalConsumerConfig{
 		TaskID:        s.taskID,
 		Queue:         s.queue,
-		TargetDB:      s.targetDB,
+		TargetDB:      targetDB,
 		ErrorStrategy: s.config.SyncConfig.ErrorStrategy,
 		SaveInterval:  5 * time.Second,
+		TaskConfig:    s.config,
 	}
 
-	consumer := NewIncrementalConsumer(consumerConfig)
-	s.consumer = consumer
+	// 创建消费者
+	s.consumer = NewIncrementalConsumer(consumerConfig)
 
 	// 启动消费
-	if err := consumer.Start(); err != nil {
-		return fmt.Errorf("启动增量消费失败: %v", err)
+	if err := s.consumer.Start(); err != nil {
+		return fmt.Errorf("启动消费者失败: %v", err)
 	}
 
-	s.logService.Info(s.taskID, "增量消费引擎已启动")
+	s.logService.Info(s.taskID, "增量消费启动成功")
 	return nil
 }
 
-// splitUnitName 分割单元名称（格式：database.table）
-func splitUnitName(unitName string) []string {
-	result := []string{}
-	parts := []rune(unitName)
-	start := 0
-	for i, ch := range parts {
-		if ch == '.' {
-			result = append(result, string(parts[start:i]))
-			start = i + 1
-		}
-	}
-	if start < len(parts) {
-		result = append(result, string(parts[start:]))
-	}
-	return result
+// markFullSyncCompleted 标记全量同步完成
+func (s *IncrementalSync) markFullSyncCompleted() {
+	s.logService.Info(s.taskID, "标记全量同步完成")
+	// 可以在这里记录一些元数据到Redis，比如全量完成时间等
 }

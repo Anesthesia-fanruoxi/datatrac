@@ -64,7 +64,6 @@ func SetupRouter() *gin.Engine {
 
 		// 任务管理
 		taskAPI := api.NewTaskAPI()
-		taskMonitorAPI := api.NewTaskMonitorAPI()
 		taskControlAPI := api.NewTaskControlAPI()
 		taskSSEAPI := api.NewTaskSSEAPI()
 		tasks := apiGroup.Group("/tasks")
@@ -75,18 +74,12 @@ func SetupRouter() *gin.Engine {
 			tasks.PUT("/:id/config", taskAPI.UpdateConfig)
 			tasks.DELETE("/:id", taskAPI.Delete)
 
-			// 任务监控
-			tasks.GET("/:id/progress", taskMonitorAPI.GetProgress)
-			tasks.GET("/:id/logs", taskMonitorAPI.GetLogs)
-			tasks.GET("/:id/incremental-status", taskMonitorAPI.GetIncrementalStatus)
-
 			// 任务控制
 			tasks.POST("/:id/start", taskControlAPI.Start)
 			tasks.POST("/:id/pause", taskControlAPI.Pause)
 			tasks.POST("/:id/stop", taskControlAPI.Stop)
 
-			// SSE流式推送
-			tasks.GET("/:id/stream", taskSSEAPI.StreamTaskUpdates)       // 兼容旧版本（已废弃）
+			// SSE流式推送（只保留3个SSE接口）
 			tasks.GET("/:id/stream/detail", taskSSEAPI.StreamTaskDetail) // 任务详情SSE
 			tasks.GET("/:id/stream/progress", taskSSEAPI.StreamProgress) // 统一进度SSE
 			tasks.GET("/:id/stream/logs", taskSSEAPI.StreamLogs)         // 日志SSE

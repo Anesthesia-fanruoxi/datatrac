@@ -57,8 +57,6 @@ func autoMigrate() error {
 	err := DB.AutoMigrate(
 		&models.DataSource{},
 		&models.SyncTask{},
-		&models.TaskUnitConfig{},
-		&models.TaskUnitRuntime{},
 	)
 
 	if err != nil {

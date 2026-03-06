@@ -3,21 +3,20 @@ package services
 import (
 	"context"
 	"database/sql"
-	"datatrace/database"
-	"datatrace/models"
 	"fmt"
 	"time"
 )
 
 // IncrementalConsumer 增量消费引擎
 type IncrementalConsumer struct {
-	taskID     string
-	queue      BinlogQueue
-	targetDB   *sql.DB
-	logService *TaskLogService
-	sseService *TaskSSEService
-	ctx        context.Context
-	cancel     context.CancelFunc
+	taskID       string
+	queue        BinlogQueue
+	targetDB     *sql.DB
+	logService   *TaskLogService
+	sseService   *TaskSSEService
+	statsService *IncrementalStatsService
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// 统计信息
 	eventsProcessed int64
@@ -27,6 +26,7 @@ type IncrementalConsumer struct {
 	// 配置
 	errorStrategy string // pause/skip
 	saveInterval  time.Duration
+	config        *TaskConfig // 任务配置，用于数据库和表名映射
 }
 
 // IncrementalConsumerConfig 消费者配置
@@ -36,6 +36,7 @@ type IncrementalConsumerConfig struct {
 	TargetDB      *sql.DB
 	ErrorStrategy string        // pause/skip
 	SaveInterval  time.Duration // 保存位置的间隔
+	TaskConfig    *TaskConfig   // 任务配置
 }
 
 // NewIncrementalConsumer 创建增量消费引擎
@@ -56,17 +57,37 @@ func NewIncrementalConsumer(config *IncrementalConsumerConfig) *IncrementalConsu
 		targetDB:      config.TargetDB,
 		logService:    NewTaskLogService(),
 		sseService:    NewTaskSSEService(),
+		statsService:  NewIncrementalStatsService(),
 		ctx:           ctx,
 		cancel:        cancel,
 		errorStrategy: config.ErrorStrategy,
 		saveInterval:  config.SaveInterval,
 		lastSaveTime:  time.Now(),
+		config:        config.TaskConfig,
 	}
 }
 
 // Start 启动消费
 func (c *IncrementalConsumer) Start() error {
 	c.logService.Info(c.taskID, "增量消费引擎启动")
+
+	// 初始化任务统计
+	c.statsService.InitTaskStats(c.taskID)
+
+	// 初始化所有表的统计（从配置中获取表列表）
+	if c.config != nil {
+		for _, dbSel := range c.config.SelectedDatabases {
+			sourceDB := dbSel.SourceDatabase
+			if sourceDB == "" {
+				sourceDB = dbSel.Database
+			}
+
+			for _, tbl := range dbSel.Tables {
+				// 为每个表创建初始统计
+				c.statsService.InitTableStats(c.taskID, sourceDB, tbl.SourceTable)
+			}
+		}
+	}
 
 	// 启动消费循环
 	go c.consumeLoop()
@@ -113,6 +134,10 @@ func (c *IncrementalConsumer) consumeLoop() {
 				c.eventsFailed++
 				c.logService.Error(c.taskID, fmt.Sprintf("处理事件失败: %v", err))
 
+				// 更新失败统计
+				eventTime := time.Unix(int64(event.Timestamp), 0)
+				c.statsService.UpdateTaskStats(c.taskID, event.Type, event.BinlogFile, event.BinlogPos, eventTime, true)
+
 				if c.errorStrategy == "pause" {
 					c.logService.Error(c.taskID, "错误策略为 pause，停止消费")
 					return
@@ -120,15 +145,17 @@ func (c *IncrementalConsumer) consumeLoop() {
 				// skip 策略：记录错误但继续处理
 			} else {
 				c.eventsProcessed++
+
+				// 更新统计
+				eventTime := time.Unix(int64(event.Timestamp), 0)
+				c.statsService.UpdateTaskStats(c.taskID, event.Type, event.BinlogFile, event.BinlogPos, eventTime, false)
+				c.statsService.UpdateTableStats(c.taskID, event.Database, event.Table, event.Type, eventTime)
 			}
 
 			// ACK 确认
 			if err := c.queue.Ack(event.ID); err != nil {
 				c.logService.Error(c.taskID, fmt.Sprintf("ACK 事件失败: %v", err))
 			}
-
-			// 更新 Binlog 位置
-			c.updatePosition(event.BinlogFile, event.BinlogPos)
 		}
 	}
 }
@@ -149,23 +176,45 @@ func (c *IncrementalConsumer) processEvent(event *BinlogEvent) error {
 
 // applyInsert 应用 INSERT 事件
 func (c *IncrementalConsumer) applyInsert(event *BinlogEvent) error {
+	// 映射数据库和表名
+	targetDB, targetTable, skip := c.mapDatabaseAndTable(event.Database, event.Table)
+	if skip {
+		// 不在同步范围内，跳过
+		return nil
+	}
+
+	// 验证数据是否为空
+	if len(event.Data) == 0 {
+		c.logService.Warning(c.taskID, fmt.Sprintf(
+			"INSERT 事件数据为空，跳过: %s.%s -> %s.%s",
+			event.Database, event.Table,
+			targetDB, targetTable,
+		))
+		return nil
+	}
+
 	// 构建 INSERT 语句
 	columns := make([]string, 0, len(event.Data))
 	placeholders := make([]string, 0, len(event.Data))
 	values := make([]interface{}, 0, len(event.Data))
+	updateClauses := make([]string, 0, len(event.Data))
 
 	for col, val := range event.Data {
 		columns = append(columns, fmt.Sprintf("`%s`", col))
 		placeholders = append(placeholders, "?")
 		values = append(values, val)
+		// 构建 ON DUPLICATE KEY UPDATE 子句
+		updateClauses = append(updateClauses, fmt.Sprintf("`%s`=VALUES(`%s`)", col, col))
 	}
 
+	// 使用 INSERT ... ON DUPLICATE KEY UPDATE 处理主键冲突
 	query := fmt.Sprintf(
-		"INSERT INTO `%s`.`%s` (%s) VALUES (%s)",
-		event.Database,
-		event.Table,
+		"INSERT INTO `%s`.`%s` (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+		targetDB,
+		targetTable,
 		joinStrings(columns, ", "),
 		joinStrings(placeholders, ", "),
+		joinStrings(updateClauses, ", "),
 	)
 
 	// 执行插入
@@ -179,6 +228,23 @@ func (c *IncrementalConsumer) applyInsert(event *BinlogEvent) error {
 
 // applyUpdate 应用 UPDATE 事件
 func (c *IncrementalConsumer) applyUpdate(event *BinlogEvent) error {
+	// 映射数据库和表名
+	targetDB, targetTable, skip := c.mapDatabaseAndTable(event.Database, event.Table)
+	if skip {
+		// 不在同步范围内，跳过
+		return nil
+	}
+
+	// 验证数据是否为空
+	if len(event.Data) == 0 {
+		c.logService.Warning(c.taskID, fmt.Sprintf(
+			"UPDATE 事件新数据为空，跳过: %s.%s -> %s.%s",
+			event.Database, event.Table,
+			targetDB, targetTable,
+		))
+		return nil
+	}
+
 	// 构建 UPDATE 语句
 	setClauses := make([]string, 0, len(event.Data))
 	setValues := make([]interface{}, 0, len(event.Data))
@@ -201,10 +267,26 @@ func (c *IncrementalConsumer) applyUpdate(event *BinlogEvent) error {
 		}
 	}
 
+	// 如果没有 WHERE 条件，记录警告但仍然执行（使用新数据作为条件）
+	if len(whereClauses) == 0 {
+		c.logService.Warning(c.taskID, fmt.Sprintf(
+			"UPDATE 事件缺少旧数据，使用新数据作为 WHERE 条件: %s.%s",
+			targetDB, targetTable,
+		))
+		for col, val := range event.Data {
+			if val == nil {
+				whereClauses = append(whereClauses, fmt.Sprintf("`%s` IS NULL", col))
+			} else {
+				whereClauses = append(whereClauses, fmt.Sprintf("`%s` = ?", col))
+				whereValues = append(whereValues, val)
+			}
+		}
+	}
+
 	query := fmt.Sprintf(
 		"UPDATE `%s`.`%s` SET %s WHERE %s",
-		event.Database,
-		event.Table,
+		targetDB,
+		targetTable,
 		joinStrings(setClauses, ", "),
 		joinStrings(whereClauses, " AND "),
 	)
@@ -218,10 +300,11 @@ func (c *IncrementalConsumer) applyUpdate(event *BinlogEvent) error {
 		return fmt.Errorf("执行 UPDATE 失败: %v, SQL: %s", err, query)
 	}
 
-	// 检查是否更新了行
+	// 检查是否更新了行（只在调试模式记录）
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		c.logService.Warning(c.taskID, fmt.Sprintf("UPDATE 未影响任何行: %s.%s", event.Database, event.Table))
+		// 降低日志级别，这种情况在增量同步中很常见
+		// c.logService.Warning(c.taskID, fmt.Sprintf("UPDATE 未影响任何行: %s.%s", targetDB, targetTable))
 	}
 
 	return nil
@@ -229,6 +312,23 @@ func (c *IncrementalConsumer) applyUpdate(event *BinlogEvent) error {
 
 // applyDelete 应用 DELETE 事件
 func (c *IncrementalConsumer) applyDelete(event *BinlogEvent) error {
+	// 映射数据库和表名
+	targetDB, targetTable, skip := c.mapDatabaseAndTable(event.Database, event.Table)
+	if skip {
+		// 不在同步范围内，跳过
+		return nil
+	}
+
+	// 验证数据是否为空
+	if len(event.Data) == 0 {
+		c.logService.Warning(c.taskID, fmt.Sprintf(
+			"DELETE 事件数据为空，跳过: %s.%s -> %s.%s",
+			event.Database, event.Table,
+			targetDB, targetTable,
+		))
+		return nil
+	}
+
 	// 构建 WHERE 条件
 	whereClauses := make([]string, 0, len(event.Data))
 	values := make([]interface{}, 0, len(event.Data))
@@ -244,8 +344,8 @@ func (c *IncrementalConsumer) applyDelete(event *BinlogEvent) error {
 
 	query := fmt.Sprintf(
 		"DELETE FROM `%s`.`%s` WHERE %s",
-		event.Database,
-		event.Table,
+		targetDB,
+		targetTable,
 		joinStrings(whereClauses, " AND "),
 	)
 
@@ -255,26 +355,53 @@ func (c *IncrementalConsumer) applyDelete(event *BinlogEvent) error {
 		return fmt.Errorf("执行 DELETE 失败: %v, SQL: %s", err, query)
 	}
 
-	// 检查是否删除了行
+	// 检查是否删除了行（只在调试模式记录）
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		c.logService.Warning(c.taskID, fmt.Sprintf("DELETE 未影响任何行: %s.%s", event.Database, event.Table))
+		// 降低日志级别
+		// c.logService.Warning(c.taskID, fmt.Sprintf("DELETE 未影响任何行: %s.%s", targetDB, targetTable))
 	}
 
 	return nil
 }
 
-// updatePosition 更新 Binlog 位置
-func (c *IncrementalConsumer) updatePosition(file string, pos uint32) {
-	// 更新到数据库
-	database.DB.Model(&models.SyncTask{}).
-		Where("id = ?", c.taskID).
-		Updates(map[string]interface{}{
-			"current_binlog_file":        file,
-			"current_binlog_pos":         pos,
-			"incremental_events_applied": c.eventsProcessed,
-			"updated_at":                 time.Now(),
-		})
+// mapDatabaseAndTable 映射源数据库和表名到目标数据库和表名
+// 返回: targetDB, targetTable, skip
+// skip=true 表示该表不在同步范围内，应该跳过
+func (c *IncrementalConsumer) mapDatabaseAndTable(sourceDB, sourceTable string) (string, string, bool) {
+	if c.config == nil {
+		// 没有配置，直接使用原名
+		return sourceDB, sourceTable, false
+	}
+
+	// 遍历配置，查找匹配的数据库和表
+	for _, dbSel := range c.config.SelectedDatabases {
+		// 检查源数据库是否匹配
+		if dbSel.SourceDatabase != sourceDB {
+			continue
+		}
+
+		// 找到匹配的数据库，获取目标数据库名
+		targetDB := dbSel.Database
+
+		// 查找匹配的表
+		for _, tbl := range dbSel.Tables {
+			if tbl.SourceTable == sourceTable {
+				// 找到匹配的表
+				targetTable := tbl.TargetTable
+				if targetTable == "" {
+					targetTable = sourceTable // 如果没有指定目标表名，使用源表名
+				}
+				return targetDB, targetTable, false
+			}
+		}
+
+		// 数据库匹配但表不匹配，跳过
+		return "", "", true
+	}
+
+	// 数据库不在同步范围内，跳过
+	return "", "", true
 }
 
 // periodicSave 定期保存位置和统计信息
@@ -294,24 +421,11 @@ func (c *IncrementalConsumer) periodicSave() {
 
 // saveStatistics 保存统计信息
 func (c *IncrementalConsumer) saveStatistics() {
-	// 计算延迟（简化版，实际应该比较 Binlog 位置）
-	var task models.SyncTask
-	if err := database.DB.First(&task, "id = ?", c.taskID).Error; err != nil {
-		return
+	// 只在有新事件时才推送进度更新
+	// 避免无意义的 SSE 推送
+	if c.eventsProcessed > 0 || c.eventsFailed > 0 {
+		c.sseService.BroadcastProgressUpdate(c.taskID)
 	}
-
-	// 更新统计信息
-	database.DB.Model(&models.SyncTask{}).
-		Where("id = ?", c.taskID).
-		Updates(map[string]interface{}{
-			"incremental_events_total":   c.eventsProcessed + c.eventsFailed,
-			"incremental_events_applied": c.eventsProcessed,
-			"updated_at":                 time.Now(),
-		})
-
-	// 推送进度更新
-	c.sseService.BroadcastProgressUpdate(c.taskID)
-
 	c.lastSaveTime = time.Now()
 }
 
@@ -324,6 +438,9 @@ func (c *IncrementalConsumer) Stop() error {
 
 	// 最后保存一次统计信息
 	c.saveStatistics()
+
+	// 清理 Redis 统计数据
+	c.statsService.ClearTaskStats(c.taskID)
 
 	c.logService.Info(c.taskID, fmt.Sprintf(
 		"增量消费引擎已停止，共处理 %d 个事件，失败 %d 个",

@@ -173,9 +173,11 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 	// 清除旧的运行时数据
 	s.clearRuntimeData(task.ID)
 
-	// 生成任务单元配置
-	if err := s.generateTaskUnits(task); err != nil {
-		return nil, fmt.Errorf("生成任务单元失败: %w", err)
+	// 重新加载配置到Redis
+	configCache := NewConfigCacheService()
+	if err := configCache.ReloadTaskConfig(task.ID); err != nil {
+		fmt.Printf("⚠️  重新加载配置到Redis失败: %v\n", err)
+		// 不阻止配置更新
 	}
 
 	return task, nil
@@ -183,18 +185,13 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 
 // clearRuntimeData 清除任务的运行时数据
 func (s *TaskService) clearRuntimeData(taskID string) {
-	// 1. 删除任务单元运行记录
-	database.DB.Where("task_id = ?", taskID).Delete(&models.TaskUnitRuntime{})
+	// 1. 清除内存进度
+	progressManager := GetProgressManager()
+	progressManager.ClearTask(taskID)
 
-	// 2. 删除任务进度记录（如果有独立的进度表）
-	// 注意：根据你的实现，进度可能是从TaskUnitRuntime计算的，不需要单独删除
-	// 如果有独立的进度表，取消下面的注释
-	// database.DB.Where("task_id = ?", taskID).Delete(&models.TaskProgress{})
-
-	// 3. 清除日志文件
+	// 2. 清除日志文件
 	logDir := filepath.Join("logs", taskID)
 	if _, err := os.Stat(logDir); err == nil {
-		// 目录存在，删除所有日志文件
 		os.RemoveAll(logDir)
 		fmt.Printf("已清除任务 %s 的日志文件\n", taskID)
 	}
@@ -212,57 +209,21 @@ func (s *TaskService) Delete(id string) error {
 		return fmt.Errorf("任务正在运行，无法删除")
 	}
 
-	// 级联删除任务单元运行记录
-	database.DB.Where("task_id = ?", id).Delete(&models.TaskUnitRuntime{})
+	// 清理 Redis 配置
+	configCache := NewConfigCacheService()
+	if err := configCache.DeleteTaskConfigFromRedis(id); err != nil {
+		fmt.Printf("清理 Redis 配置失败: %v\n", err)
+	}
 
-	// 级联删除任务单元配置
-	database.DB.Where("task_id = ?", id).Delete(&models.TaskUnitConfig{})
+	// 清理 Redis 增量统计数据
+	statsService := NewIncrementalStatsService()
+	if err := statsService.ClearTaskStats(id); err != nil {
+		fmt.Printf("清理 Redis 统计数据失败: %v\n", err)
+	}
 
 	// 删除任务本身
 	if err := database.DB.Delete(&models.SyncTask{}, "id = ?", id).Error; err != nil {
 		return fmt.Errorf("删除失败: %w", err)
-	}
-
-	return nil
-}
-
-// generateTaskUnits 生成任务单元配置
-func (s *TaskService) generateTaskUnits(task *models.SyncTask) error {
-	// 解析配置
-	var config TaskConfig
-	if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
-		return err
-	}
-
-	// 删除旧的任务单元配置
-	database.DB.Where("task_id = ?", task.ID).Delete(&models.TaskUnitConfig{})
-
-	// 生成新的任务单元配置
-	var units []models.TaskUnitConfig
-	for _, db := range config.SelectedDatabases {
-		for _, tableConfig := range db.Tables {
-			// 使用目标表名作为单元名称
-			targetDatabase := db.Database
-			targetTable := tableConfig.TargetTable
-			if targetTable == "" {
-				targetTable = tableConfig.SourceTable
-			}
-
-			unit := models.TaskUnitConfig{
-				ID:       uuid.New().String(),
-				TaskID:   task.ID,
-				UnitName: fmt.Sprintf("%s.%s", targetDatabase, targetTable),
-				UnitType: "table",
-			}
-			units = append(units, unit)
-		}
-	}
-
-	// 批量插入
-	if len(units) > 0 {
-		if err := database.DB.Create(&units).Error; err != nil {
-			return err
-		}
 	}
 
 	return nil

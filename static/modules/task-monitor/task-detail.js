@@ -7,26 +7,18 @@
         
         // 加载任务详情
         load: async function(taskId) {
-            try {
-                const result = await HttpUtils.get(`/api/v1/tasks/${taskId}`);
-                
-                if (result.code === 200) {
-                    this.currentTask = result.data;
-                    this.updateHeader();
-                    
-                    // 首次加载进度和日志（HTTP 请求）
-                    await this.loadProgress(taskId);
-                    await this.loadLogs(taskId);
-                    
-                    // 启动 SSE 实时推送
-                    this.startSSE(taskId);
-                } else {
-                    Toast.error('加载任务详情失败: ' + result.message);
-                }
-            } catch (error) {
-                console.error('加载任务详情失败:', error);
-                Toast.error('加载任务详情失败: ' + error.message);
+            // 设置当前任务 ID（用于 SSE 连接）
+            if (!this.currentTask) {
+                this.currentTask = { id: taskId };
+            } else {
+                this.currentTask.id = taskId;
             }
+            
+            // 更新头部
+            this.updateHeader();
+            
+            // 直接启动 SSE 连接，detail SSE 会推送任务详情
+            this.startSSE(taskId);
         },
         
         // 启动 SSE 连接
@@ -63,16 +55,27 @@
             
             // 更新当前任务信息
             if (this.currentTask) {
+                this.currentTask.id = taskDetail.id || this.currentTask.id;
+                this.currentTask.name = taskDetail.name;
                 this.currentTask.status = taskDetail.status;
                 this.currentTask.is_running = taskDetail.is_running;
                 this.currentTask.current_step = taskDetail.current_step;
                 this.currentTask.sync_mode = taskDetail.sync_mode;
             }
             
-            // 直接重新渲染进度UI（不发起HTTP请求）
-            this.updateProgressUI({});
+            // 更新头部显示任务名称
+            this.updateHeader();
             
-            // 刷新左侧任务列表（更新任务状态显示）
+            // 如果是增量模式,初始化表格容器
+            if (taskDetail.sync_mode === 'incremental') {
+                const container = document.getElementById('progressContent');
+                if (container && !container.querySelector('#incrementalTablePlaceholder')) {
+                    container.innerHTML = '<div id="incrementalTablePlaceholder"></div>';
+                }
+            }
+            
+            // 不重新渲染进度 UI，因为 progress SSE 会单独推送进度数据
+            // 只刷新左侧任务列表（更新任务状态显示）
             if (window.TaskMonitorList) {
                 window.TaskMonitorList.load();
             }
@@ -83,8 +86,10 @@
             const title = document.getElementById('taskDetailTitle');
             const actions = document.getElementById('taskActions');
             
-            if (this.currentTask) {
-                title.innerHTML = `<i class="bi bi-info-circle me-2"></i>${this.currentTask.name}`;
+            if (this.currentTask && this.currentTask.id) {
+                // 显示任务名称（如果有），否则显示 "加载中..."
+                const taskName = this.currentTask.name || '加载中...';
+                title.innerHTML = `<i class="bi bi-info-circle me-2"></i>${taskName}`;
                 actions.style.display = 'block';
             } else {
                 title.innerHTML = '<i class="bi bi-info-circle me-2"></i>请选择任务';
@@ -92,119 +97,166 @@
             }
         },
         
-        // 加载任务进度
-        loadProgress: async function(taskId) {
-            try {
-                const result = await HttpUtils.get(`/api/v1/tasks/${taskId}/progress`);
-                
-                if (result.code === 200) {
-                    console.log('进度数据:', result.data); // 调试日志
-                    this.updateProgressUI(result.data);
-                }
-            } catch (error) {
-                console.error('加载进度失败:', error);
-            }
-        },
+
         
         // 更新进度 UI
-        updateProgressUI: function(progress) {
+        updateProgressUI: async function(progress) {
             const container = document.getElementById('progressContent');
             if (!container) return;
             
-            // 优先使用当前任务的信息
-            const taskStatus = this.currentTask?.status || progress?.status || 'configured';
-            const isRunning = this.currentTask?.is_running || false;
-            const currentStep = this.currentTask?.current_step || progress?.current_step || '';
-            const syncMode = this.currentTask?.sync_mode || progress?.sync_mode || 'full';
+            // 如果没有进度数据,直接返回
+            if (!progress) return;
             
-            // 如果没有进度数据，使用任务的基本信息
-            if (!progress || Object.keys(progress).length === 0) {
-                progress = {
-                    status: taskStatus,
-                    sync_mode: syncMode,
-                    current_step: currentStep,
-                    overall_progress: 0,
-                    completed_tables: 0,
-                    total_tables: 0
-                };
+            // 从 progress 数据中获取同步模式和步骤信息
+            const syncMode = progress.sync_mode || 'full';
+            const currentStep = progress.current_step || '';
+            
+            // 同时更新 currentTask 中的信息(用于其他地方使用)
+            if (this.currentTask) {
+                this.currentTask.sync_mode = syncMode;
+                this.currentTask.current_step = currentStep;
             }
             
-            // 定义步骤（根据后端实际使用的步骤值）
-            const steps = syncMode === 'full' ? [
-                { key: 'initialize', name: '初始化', icon: 'bi-gear' },
-                { key: 'sync_data', name: '数据同步', icon: 'bi-arrow-repeat' },
-                { key: 'completed', name: '完成', icon: 'bi-check-circle' }
-            ] : [
-                { key: 'initialize', name: '初始化', icon: 'bi-gear' },
-                { key: 'incremental', name: 'Binlog监听', icon: 'bi-broadcast' },
-                { key: 'running', name: '运行中', icon: 'bi-play-circle' }
-            ];
+            // 从 currentTask 获取任务状态信息
+            const taskStatus = this.currentTask?.status || 'configured';
+            const isRunning = this.currentTask?.is_running || false;
             
-            // 判断是否已完成
-            const isCompleted = taskStatus === 'completed' || 
-                               (syncMode === 'full' && progress.completed_tables === progress.total_tables && progress.total_tables > 0);
+            console.log('更新进度UI - syncMode:', syncMode, 'currentStep:', currentStep, 'progress:', progress);
             
-            // 渲染步骤进度条（不可点击）
-            container.innerHTML = `
-                <div class="sync-steps">
-                    ${steps.map((step, index) => {
-                        let isActive = false;
-                        let isStepCompleted = false;
-                        let stepStatus = '';
-                        
-                        if (isCompleted) {
-                            // 任务已完成，所有步骤都标记为完成
-                            isStepCompleted = true;
-                            isActive = step.key === 'completed' || step.key === 'running';
-                            stepStatus = '已完成';
-                        } else if (!isRunning || !currentStep) {
-                            // 任务未运行或没有当前步骤，显示待开始状态
-                            if (index === 0) {
-                                stepStatus = '待开始';
-                            }
-                        } else {
-                            // 任务进行中，根据 current_step 高亮
-                            isActive = step.key === currentStep;
-                            isStepCompleted = this.isStepCompleted(steps, currentStep, step.key);
-                            if (isActive) {
-                                stepStatus = '进行中...';
-                            }
-                        }
-                        
-                        const statusClass = isActive ? 'active' : (isStepCompleted ? 'completed' : '');
-                        
-                        return `
-                            <div class="sync-step ${statusClass}" data-step="${step.key}">
-                                <div class="step-indicator">
-                                    <div class="step-number">
-                                        ${isStepCompleted && !isActive ? '<i class="bi bi-check"></i>' : (index + 1)}
-                                    </div>
-                                    <div class="step-line"></div>
-                                </div>
-                                <div class="step-content">
-                                    <div class="step-icon"><i class="${step.icon}"></i></div>
-                                    <div class="step-name">${step.name}</div>
-                                    ${stepStatus ? `<div class="step-status" style="color: ${isCompleted ? '#10b981' : (isActive ? '#667eea' : '#64748b')};">${stepStatus}</div>` : ''}
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
+            // 如果是增量模式且有表统计数据,直接更新表格
+            if (syncMode === 'incremental' && progress.table_stats) {
+                this.updateIncrementalTable(progress.table_stats);
+                return;
+            }
+            
+            // 全量模式:渲染进度条和详情
+            if (syncMode === 'full') {
+                // 定义步骤
+                const steps = [
+                    { key: 'initialize', name: '初始化', icon: 'bi-gear' },
+                    { key: 'sync_data', name: '数据同步', icon: 'bi-arrow-repeat' },
+                    { key: 'completed', name: '完成', icon: 'bi-check-circle' }
+                ];
                 
-                <div class="progress-details mt-3">
-                    ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
-                    ${this.renderProgressDetail('总体进度', (progress.overall_progress ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress || 0)}
-                    ${this.renderProgressDetail('表进度', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize', false)}
-                    ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
-                    ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
-                    ${progress.elapsed_time ? this.renderProgressDetail('已用时间', progress.elapsed_time, false, false) : ''}
-                    ${progress.estimated_time ? this.renderProgressDetail('预计剩余', progress.estimated_time, false, false) : ''}
-                    ${syncMode === 'incremental' && progress.incremental_events_applied !== undefined ? this.renderProgressDetail('已应用事件', this.formatNumber(progress.incremental_events_applied), currentStep === 'incremental', false) : ''}
-                </div>
-            `;
-            
-            // 不再需要自动启动步骤进度SSE，因为已经在startSSE中启动了统一的进度SSE
+                // 判断是否已完成
+                const isCompleted = taskStatus === 'completed' || 
+                                   (progress.completed_tables === progress.total_tables && progress.total_tables > 0);
+                
+                // 渲染步骤进度条
+                container.innerHTML = `
+                    <div class="sync-steps">
+                        ${steps.map((step, index) => {
+                            let isActive = false;
+                            let isStepCompleted = false;
+                            let stepStatus = '';
+                            
+                            if (isCompleted) {
+                                isStepCompleted = true;
+                                isActive = step.key === 'completed';
+                                stepStatus = '已完成';
+                            } else if (!isRunning || !currentStep) {
+                                if (index === 0) {
+                                    stepStatus = '待开始';
+                                }
+                            } else {
+                                isActive = step.key === currentStep;
+                                isStepCompleted = this.isStepCompleted(steps, currentStep, step.key);
+                                if (isActive) {
+                                    stepStatus = '进行中...';
+                                }
+                            }
+                            
+                            const statusClass = isActive ? 'active' : (isStepCompleted ? 'completed' : '');
+                            
+                            return `
+                                <div class="sync-step ${statusClass}" data-step="${step.key}">
+                                    <div class="step-indicator">
+                                        <div class="step-number">
+                                            ${isStepCompleted && !isActive ? '<i class="bi bi-check"></i>' : (index + 1)}
+                                        </div>
+                                        <div class="step-line"></div>
+                                    </div>
+                                    <div class="step-content">
+                                        <div class="step-icon"><i class="${step.icon}"></i></div>
+                                        <div class="step-name">${step.name}</div>
+                                        ${stepStatus ? `<div class="step-status" style="color: ${isCompleted ? '#10b981' : (isActive ? '#667eea' : '#64748b')};">${stepStatus}</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    
+                    <div class="progress-details mt-3">
+                        ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
+                        ${this.renderProgressDetail('总体进度', (progress.overall_progress ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress || 0)}
+                        ${this.renderProgressDetail('表进度', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize', false)}
+                        ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
+                        ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
+                        ${progress.elapsed_time ? this.renderProgressDetail('已用时间', progress.elapsed_time, false, false) : ''}
+                        ${progress.estimated_time ? this.renderProgressDetail('预计剩余', progress.estimated_time, false, false) : ''}
+                    </div>
+                `;
+            }
         },
+        
+        // 更新增量表格（增量更新，不重新渲染整个表格）
+        updateIncrementalTable: function(tableStats) {
+            const placeholder = document.getElementById('incrementalTablePlaceholder');
+            if (!placeholder) return;
+            
+            // 检查表格是否已存在
+            let tableContainer = placeholder.querySelector('.incremental-table-container');
+            
+            if (!tableContainer) {
+                // 表格不存在，创建表格
+                if (!tableStats || tableStats.length === 0) {
+                    placeholder.innerHTML = '<div class="text-muted text-center mt-3">暂无增量统计数据</div>';
+                    return;
+                }
+                
+                placeholder.innerHTML = `
+                    <div class="incremental-table-container mt-3">
+                        <h6 class="mb-2">同步统计</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>表名</th>
+                                        <th>同步数据总数</th>
+                                        <th>同步进度</th>
+                                        <th>历史增量</th>
+                                        <th>今日增量</th>
+                                        <th>复制延迟</th>
+                                        <th>最后增量时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="incrementalTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 更新表格数据
+            const tbody = document.getElementById('incrementalTableBody');
+            if (!tbody || !tableStats) return;
+            
+            // 清空并重新填充（简单方案，后续可优化为只更新变化的行）
+            tbody.innerHTML = tableStats.map(t => `
+                <tr data-table="${t.database}.${t.table}">
+                    <td><strong>${t.database}.${t.table}</strong></td>
+                    <td>${this.formatNumber(t.full_sync_total_records || 0)}</td>
+                    <td>${t.full_sync_progress ? t.full_sync_progress.toFixed(2) + '%' : '0%'}</td>
+                    <td>${this.formatNumber(t.total_count || 0)}</td>
+                    <td>${this.formatNumber(t.today_count || 0)}</td>
+                    <td>${t.replication_lag_seconds ? (t.replication_lag_seconds * 1000) : 0} ms</td>
+                    <td>${t.last_event_time ? this.formatDateTime(t.last_event_time) : '-'}</td>
+                </tr>
+            `).join('');
+        },
+        
+
         
         // 获取状态文本
         getStatusText: function(status) {
@@ -260,20 +312,7 @@
             `;
         },
         
-        // 加载任务日志（支持category参数）
-        loadLogs: async function(taskId, category) {
-            category = category || 'all';
-            
-            try {
-                const result = await HttpUtils.get(`/api/v1/tasks/${taskId}/logs?limit=1000&category=${category}`);
-                
-                if (result.code === 200) {
-                    this.updateLogsUI(result.data);
-                }
-            } catch (error) {
-                console.error('加载日志失败:', error);
-            }
-        },
+
         
         // 更新日志 UI（替换所有日志）
         updateLogsUI: function(logs) {
@@ -331,6 +370,53 @@
             if (window.TaskMonitorLogsSSE) {
                 window.TaskMonitorLogsSSE.switchCategory(this.currentTask.id, category);
             }
+        },
+        
+        // 渲染增量统计信息
+        renderIncrementalStats: function(progress, currentStep) {
+            if (!progress || !progress.incremental_stats) {
+                return '';
+            }
+            
+            const stats = progress.incremental_stats;
+            const isActive = currentStep === 'incremental';
+            
+            // 基本统计信息
+            const basicStats = `
+                ${this.renderProgressDetail('历史同步总数', this.formatNumber(stats.total_events || 0), isActive, false)}
+                ${this.renderProgressDetail('今日处理数量', this.formatNumber(stats.today_events || 0), isActive, false)}
+                ${stats.last_event_time ? this.renderProgressDetail('最新数据时间', this.formatDateTime(stats.last_event_time), isActive, false) : ''}
+                ${this.renderProgressDetail('复制延迟', `${stats.replication_lag_seconds || 0} 秒`, isActive, false)}
+                ${stats.current_binlog_file ? this.renderProgressDetail('Binlog 位置', `${stats.current_binlog_file}:${stats.current_binlog_pos || 0}`, false, false) : ''}
+            `;
+            
+            return basicStats;
+        },
+        
+
+        
+        // 获取事件类型徽章颜色
+        getEventTypeBadge: function(eventType) {
+            const badgeMap = {
+                'INSERT': 'success',
+                'UPDATE': 'primary',
+                'DELETE': 'danger'
+            };
+            return badgeMap[eventType] || 'secondary';
+        },
+        
+        // 格式化日期时间
+        formatDateTime: function(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleString('zh-CN', { 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit',
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
         },
         
         // 格式化日志条目

@@ -13,7 +13,8 @@ import (
 type TaskSSEService struct {
 	progressService *TaskProgressService
 	logService      *TaskLogService
-	clients         map[string]map[chan SSEMessage]struct{}            // taskID -> clients (for progress and task_detail)
+	detailClients   map[string]map[chan SSEMessage]struct{}            // taskID -> detail clients
+	progressClients map[string]map[chan SSEMessage]struct{}            // taskID -> progress clients
 	logClients      map[string]map[string]map[chan SSEMessage]struct{} // taskID -> category -> clients (for logs)
 	mu              sync.RWMutex
 }
@@ -30,41 +31,78 @@ var (
 )
 
 // NewTaskSSEService 获取SSE服务单例
-// NewTaskSSEService 获取SSE服务单例
 func NewTaskSSEService() *TaskSSEService {
 	taskSSEOnce.Do(func() {
 		taskSSEInstance = &TaskSSEService{
 			progressService: NewTaskProgressService(),
 			logService:      NewTaskLogService(),
-			clients:         make(map[string]map[chan SSEMessage]struct{}),
+			detailClients:   make(map[string]map[chan SSEMessage]struct{}),
+			progressClients: make(map[string]map[chan SSEMessage]struct{}),
 			logClients:      make(map[string]map[string]map[chan SSEMessage]struct{}),
 		}
 	})
 	return taskSSEInstance
 }
 
-// AddClient 添加客户端
-func (s *TaskSSEService) AddClient(taskID string, client chan SSEMessage) {
+// AddDetailClient 添加任务详情客户端
+func (s *TaskSSEService) AddDetailClient(taskID string, client chan SSEMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.clients[taskID] == nil {
-		s.clients[taskID] = make(map[chan SSEMessage]struct{})
+	if s.detailClients[taskID] == nil {
+		s.detailClients[taskID] = make(map[chan SSEMessage]struct{})
 	}
-	s.clients[taskID][client] = struct{}{}
+	s.detailClients[taskID][client] = struct{}{}
 }
 
-// RemoveClient 移除客户端（不关闭 channel，由调用方管理）
-func (s *TaskSSEService) RemoveClient(taskID string, client chan SSEMessage) {
+// RemoveDetailClient 移除任务详情客户端
+func (s *TaskSSEService) RemoveDetailClient(taskID string, client chan SSEMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if clients, ok := s.clients[taskID]; ok {
+	if clients, ok := s.detailClients[taskID]; ok {
 		delete(clients, client)
 		if len(clients) == 0 {
-			delete(s.clients, taskID)
+			delete(s.detailClients, taskID)
 		}
 	}
+}
+
+// AddProgressClient 添加进度客户端
+func (s *TaskSSEService) AddProgressClient(taskID string, client chan SSEMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.progressClients[taskID] == nil {
+		s.progressClients[taskID] = make(map[chan SSEMessage]struct{})
+	}
+	s.progressClients[taskID][client] = struct{}{}
+}
+
+// RemoveProgressClient 移除进度客户端
+func (s *TaskSSEService) RemoveProgressClient(taskID string, client chan SSEMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if clients, ok := s.progressClients[taskID]; ok {
+		delete(clients, client)
+		if len(clients) == 0 {
+			delete(s.progressClients, taskID)
+		}
+	}
+}
+
+// AddClient 添加客户端（已废弃，保留向后兼容）
+func (s *TaskSSEService) AddClient(taskID string, client chan SSEMessage) {
+	// 默认添加到进度客户端
+	s.AddProgressClient(taskID, client)
+}
+
+// RemoveClient 移除客户端（已废弃，保留向后兼容）
+func (s *TaskSSEService) RemoveClient(taskID string, client chan SSEMessage) {
+	// 尝试从两个列表中移除
+	s.RemoveDetailClient(taskID, client)
+	s.RemoveProgressClient(taskID, client)
 }
 
 // AddLogClient 添加日志客户端（带category）
@@ -430,25 +468,34 @@ func (s *TaskSSEService) sendUpdate(taskID string, client chan SSEMessage) {
 // BroadcastProgressUpdate 广播进度更新
 func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 	s.mu.RLock()
-	clients, ok := s.clients[taskID]
+	clients, ok := s.progressClients[taskID]
 	s.mu.RUnlock()
 
+	fmt.Printf("[DEBUG] BroadcastProgressUpdate - taskID: %s, 客户端数量: %d\n", taskID, len(clients))
+
 	if !ok || len(clients) == 0 {
+		fmt.Printf("[DEBUG] BroadcastProgressUpdate - 没有进度客户端,跳过推送\n")
 		return
 	}
 
 	// 获取最新进度
 	progress, err := s.progressService.GetTaskProgress(taskID)
 	if err != nil {
+		fmt.Printf("[DEBUG] BroadcastProgressUpdate - 获取进度失败: %v\n", err)
 		return
 	}
 
-	// 向所有客户端发送更新
+	fmt.Printf("[DEBUG] BroadcastProgressUpdate - 进度数据: sync_mode=%s, current_step=%s\n",
+		progress.SyncMode, progress.CurrentStep)
+
+	// 向所有进度客户端发送更新
+	sentCount := 0
 	for client := range clients {
 		func(c chan SSEMessage) {
 			defer func() {
 				if r := recover(); r != nil {
 					// channel 已关闭，忽略错误
+					fmt.Printf("[DEBUG] BroadcastProgressUpdate - 发送失败(channel已关闭)\n")
 				}
 			}()
 			select {
@@ -456,17 +503,21 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 				Event: "progress",
 				Data:  progress,
 			}:
+				sentCount++
 			default:
 				// 客户端缓冲区满，跳过
+				fmt.Printf("[DEBUG] BroadcastProgressUpdate - 客户端缓冲区满,跳过\n")
 			}
 		}(client)
 	}
+
+	fmt.Printf("[DEBUG] BroadcastProgressUpdate - 成功发送给 %d 个客户端\n", sentCount)
 }
 
 // BroadcastTaskDetailUpdate 广播任务详情更新
 func (s *TaskSSEService) BroadcastTaskDetailUpdate(taskID string) {
 	s.mu.RLock()
-	clients, ok := s.clients[taskID]
+	clients, ok := s.detailClients[taskID]
 	s.mu.RUnlock()
 
 	if !ok || len(clients) == 0 {
@@ -489,7 +540,7 @@ func (s *TaskSSEService) BroadcastTaskDetailUpdate(taskID string) {
 		"sync_mode":    task.SyncMode,
 	}
 
-	// 向所有客户端发送更新
+	// 向所有详情客户端发送更新
 	for client := range clients {
 		func(c chan SSEMessage) {
 			defer func() {
