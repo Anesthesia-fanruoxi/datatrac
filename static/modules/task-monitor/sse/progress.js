@@ -4,13 +4,24 @@
     
     window.TaskMonitorProgressSSE = {
         eventSource: null,
+        currentTaskId: null,
+        currentDatabase: null,
         
         // 启动进度 SSE 连接
-        start: function(taskId) {
+        start: function(taskId, database) {
             this.close();
             
-            console.log('启动进度 SSE 连接，任务ID:', taskId);
-            this.eventSource = new EventSource(`/api/v1/tasks/${taskId}/stream/progress`);
+            this.currentTaskId = taskId;
+            this.currentDatabase = database || null;
+            
+            // 构建URL，如果有database参数则添加
+            let url = `/api/v1/tasks/${taskId}/stream/progress`;
+            if (database) {
+                url += `?database=${encodeURIComponent(database)}`;
+            }
+            
+            console.log('启动进度 SSE 连接，任务ID:', taskId, 'database:', database, 'URL:', url);
+            this.eventSource = new EventSource(url);
             
             // 监听进度事件
             this.eventSource.addEventListener('progress', (e) => {
@@ -37,6 +48,12 @@
             };
         },
         
+        // 切换数据库（重新建立SSE连接）
+        switchDatabase: function(taskId, database) {
+            console.log('切换数据库，taskId:', taskId, 'database:', database);
+            this.start(taskId, database);
+        },
+        
         // 关闭 SSE 连接
         close: function() {
             if (this.eventSource) {
@@ -44,6 +61,8 @@
                 this.eventSource.close();
                 this.eventSource = null;
             }
+            this.currentTaskId = null;
+            this.currentDatabase = null;
         }
     };
 })();

@@ -81,7 +81,7 @@ func SetupRouter() *gin.Engine {
 
 			// SSE流式推送（只保留3个SSE接口）
 			tasks.GET("/:id/stream/detail", taskSSEAPI.StreamTaskDetail) // 任务详情SSE
-			tasks.GET("/:id/stream/progress", taskSSEAPI.StreamProgress) // 统一进度SSE
+			tasks.GET("/:id/stream/progress", taskSSEAPI.StreamProgress) // 统一进度SSE（支持 ?database=xxx 参数）
 			tasks.GET("/:id/stream/logs", taskSSEAPI.StreamLogs)         // 日志SSE
 		}
 	}

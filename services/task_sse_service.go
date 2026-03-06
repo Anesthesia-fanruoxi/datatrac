@@ -14,7 +14,7 @@ type TaskSSEService struct {
 	progressService *TaskProgressService
 	logService      *TaskLogService
 	detailClients   map[string]map[chan SSEMessage]struct{}            // taskID -> detail clients
-	progressClients map[string]map[chan SSEMessage]struct{}            // taskID -> progress clients
+	progressClients map[string]map[chan SSEMessage]string              // taskID -> client -> database (存储每个客户端的database参数)
 	logClients      map[string]map[string]map[chan SSEMessage]struct{} // taskID -> category -> clients (for logs)
 	mu              sync.RWMutex
 }
@@ -37,7 +37,7 @@ func NewTaskSSEService() *TaskSSEService {
 			progressService: NewTaskProgressService(),
 			logService:      NewTaskLogService(),
 			detailClients:   make(map[string]map[chan SSEMessage]struct{}),
-			progressClients: make(map[string]map[chan SSEMessage]struct{}),
+			progressClients: make(map[string]map[chan SSEMessage]string),
 			logClients:      make(map[string]map[string]map[chan SSEMessage]struct{}),
 		}
 	})
@@ -68,15 +68,15 @@ func (s *TaskSSEService) RemoveDetailClient(taskID string, client chan SSEMessag
 	}
 }
 
-// AddProgressClient 添加进度客户端
-func (s *TaskSSEService) AddProgressClient(taskID string, client chan SSEMessage) {
+// AddProgressClient 添加进度客户端（带 database 参数）
+func (s *TaskSSEService) AddProgressClient(taskID string, client chan SSEMessage, dbName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.progressClients[taskID] == nil {
-		s.progressClients[taskID] = make(map[chan SSEMessage]struct{})
+		s.progressClients[taskID] = make(map[chan SSEMessage]string)
 	}
-	s.progressClients[taskID][client] = struct{}{}
+	s.progressClients[taskID][client] = dbName
 }
 
 // RemoveProgressClient 移除进度客户端
@@ -94,8 +94,8 @@ func (s *TaskSSEService) RemoveProgressClient(taskID string, client chan SSEMess
 
 // AddClient 添加客户端（已废弃，保留向后兼容）
 func (s *TaskSSEService) AddClient(taskID string, client chan SSEMessage) {
-	// 默认添加到进度客户端
-	s.AddProgressClient(taskID, client)
+	// 默认添加到进度客户端，database 参数为空
+	s.AddProgressClient(taskID, client, "")
 }
 
 // RemoveClient 移除客户端（已废弃，保留向后兼容）
@@ -163,96 +163,6 @@ func (s *TaskSSEService) StreamTaskUpdates(taskID string, client chan SSEMessage
 	}
 }
 
-// StreamInitialize 流式推送初始化步骤更新
-func (s *TaskSSEService) StreamInitialize(taskID string, client chan SSEMessage, done <-chan struct{}) {
-	ticker := time.NewTicker(1 * time.Second) // 初始化阶段更新更频繁
-	defer ticker.Stop()
-
-	// 立即发送一次
-	s.sendInitializeUpdate(taskID, client)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			// 检查任务是否正在运行
-			var task models.SyncTask
-			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
-				// 如果任务不在运行，停止推送
-				if !task.IsRunning {
-					return
-				}
-				// 如果已经不在初始化阶段，停止推送
-				if task.CurrentStep != "initialize" && task.CurrentStep != "" {
-					return
-				}
-			}
-			s.sendInitializeUpdate(taskID, client)
-		}
-	}
-}
-
-// StreamSync 流式推送数据同步步骤更新
-func (s *TaskSSEService) StreamSync(taskID string, client chan SSEMessage, done <-chan struct{}) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	// 立即发送一次
-	s.sendSyncUpdate(taskID, client)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			// 检查任务是否正在运行
-			var task models.SyncTask
-			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
-				// 如果任务不在运行，停止推送
-				if !task.IsRunning {
-					return
-				}
-				// 如果不在数据同步阶段，停止推送
-				if task.CurrentStep != "sync_data" {
-					return
-				}
-			}
-			s.sendSyncUpdate(taskID, client)
-		}
-	}
-}
-
-// StreamIncremental 流式推送增量消费步骤更新
-func (s *TaskSSEService) StreamIncremental(taskID string, client chan SSEMessage, done <-chan struct{}) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	// 立即发送一次
-	s.sendIncrementalUpdate(taskID, client)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			// 检查任务是否正在运行
-			var task models.SyncTask
-			if err := database.DB.First(&task, "id = ?", taskID).Error; err == nil {
-				// 如果任务不在运行，停止推送
-				if !task.IsRunning {
-					return
-				}
-				// 如果不在增量消费阶段，停止推送
-				if task.CurrentStep != "incremental" {
-					return
-				}
-			}
-			s.sendIncrementalUpdate(taskID, client)
-		}
-	}
-}
-
 // StreamLogs 流式推送任务日志（事件驱动 + 文件监听）
 func (s *TaskSSEService) StreamLogs(taskID string, category string, client chan SSEMessage, done <-chan struct{}) {
 	// 创建日志文件监听器
@@ -278,75 +188,12 @@ func (s *TaskSSEService) StreamTaskDetail(taskID string, client chan SSEMessage,
 }
 
 // StreamProgress 流式推送任务进度（事件驱动）
-func (s *TaskSSEService) StreamProgress(taskID string, client chan SSEMessage, done <-chan struct{}) {
-	// 立即发送一次初始数据
-	s.sendProgressUpdate(taskID, client)
+func (s *TaskSSEService) StreamProgress(taskID string, dbName string, client chan SSEMessage, done <-chan struct{}) {
+	// 立即发送一次初始数据（带 database 参数）
+	s.sendProgressUpdate(taskID, dbName, client)
 
 	// 保持连接，等待广播或客户端断开
 	<-done
-}
-
-// sendInitializeUpdate 发送初始化步骤更新（只推送进度）
-func (s *TaskSSEService) sendInitializeUpdate(taskID string, client chan SSEMessage) {
-	defer func() {
-		if r := recover(); r != nil {
-			// channel 已关闭，忽略错误
-		}
-	}()
-
-	// 获取进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
-	if err == nil {
-		select {
-		case client <- SSEMessage{
-			Event: "progress",
-			Data:  progress,
-		}:
-		default:
-		}
-	}
-}
-
-// sendSyncUpdate 发送数据同步步骤更新（只推送进度）
-func (s *TaskSSEService) sendSyncUpdate(taskID string, client chan SSEMessage) {
-	defer func() {
-		if r := recover(); r != nil {
-			// channel 已关闭，忽略错误
-		}
-	}()
-
-	// 获取进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
-	if err == nil {
-		select {
-		case client <- SSEMessage{
-			Event: "progress",
-			Data:  progress,
-		}:
-		default:
-		}
-	}
-}
-
-// sendIncrementalUpdate 发送增量消费步骤更新（只推送进度）
-func (s *TaskSSEService) sendIncrementalUpdate(taskID string, client chan SSEMessage) {
-	defer func() {
-		if r := recover(); r != nil {
-			// channel 已关闭，忽略错误
-		}
-	}()
-
-	// 获取进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
-	if err == nil {
-		select {
-		case client <- SSEMessage{
-			Event: "progress",
-			Data:  progress,
-		}:
-		default:
-		}
-	}
 }
 
 // sendLogsUpdate 发送日志更新（推送所有日志）
@@ -403,16 +250,16 @@ func (s *TaskSSEService) sendTaskDetailUpdate(taskID string, client chan SSEMess
 	}
 }
 
-// sendProgressUpdate 发送统一的进度更新
-func (s *TaskSSEService) sendProgressUpdate(taskID string, client chan SSEMessage) {
+// sendProgressUpdate 发送统一的进度更新（带 database 参数）
+func (s *TaskSSEService) sendProgressUpdate(taskID string, dbName string, client chan SSEMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			// channel 已关闭，忽略错误
 		}
 	}()
 
-	// 获取进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
+	// 获取进度（传递 database 参数）
+	progress, err := s.progressService.GetTaskProgress(taskID, dbName)
 	if err == nil {
 		select {
 		case client <- SSEMessage{
@@ -434,8 +281,8 @@ func (s *TaskSSEService) sendUpdate(taskID string, client chan SSEMessage) {
 		}
 	}()
 
-	// 获取进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
+	// 获取进度（不过滤数据库）
+	progress, err := s.progressService.GetTaskProgress(taskID, "")
 	if err == nil {
 		select {
 		case client <- SSEMessage{
@@ -461,7 +308,7 @@ func (s *TaskSSEService) sendUpdate(taskID string, client chan SSEMessage) {
 	}
 }
 
-// BroadcastProgressUpdate 广播进度更新
+// BroadcastProgressUpdate 广播进度更新（根据每个客户端的 database 参数发送不同数据）
 func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 	s.mu.RLock()
 	clients, ok := s.progressClients[taskID]
@@ -471,21 +318,22 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 		return
 	}
 
-	// 获取最新进度
-	progress, err := s.progressService.GetTaskProgress(taskID)
-	if err != nil {
-		return
-	}
-
-	// 向所有进度客户端发送更新
+	// 向所有进度客户端发送更新（每个客户端根据其 database 参数获取不同的数据）
 	sentCount := 0
-	for client := range clients {
-		func(c chan SSEMessage) {
+	for client, dbName := range clients {
+		func(c chan SSEMessage, db string) {
 			defer func() {
 				if r := recover(); r != nil {
 					// channel 已关闭，忽略错误
 				}
 			}()
+
+			// 获取该客户端的进度（带 database 参数）
+			progress, err := s.progressService.GetTaskProgress(taskID, db)
+			if err != nil {
+				return
+			}
+
 			select {
 			case c <- SSEMessage{
 				Event: "progress",
@@ -495,7 +343,7 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 			default:
 				// 客户端缓冲区满，跳过
 			}
-		}(client)
+		}(client, dbName)
 	}
 }
 

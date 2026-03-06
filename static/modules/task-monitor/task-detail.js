@@ -123,9 +123,15 @@
             
             console.log('更新进度UI - syncMode:', syncMode, 'currentStep:', currentStep, 'progress:', progress);
             
-            // 如果是增量模式且有表统计数据,直接更新表格
-            if (syncMode === 'incremental' && progress.table_stats) {
-                this.updateIncrementalTable(progress.table_stats);
+            // 如果是增量模式，显示数据库级别统计或表明细
+            if (syncMode === 'incremental') {
+                if (progress.database_stats) {
+                    // 显示数据库级别统计（第一级）
+                    this.updateDatabaseStats(progress.database_stats, progress.table_stats);
+                } else if (progress.table_stats) {
+                    // 兼容旧版本：直接显示表明细
+                    this.updateIncrementalTable(progress.table_stats);
+                }
                 return;
             }
             
@@ -197,6 +203,245 @@
                     </div>
                 `;
             }
+        },
+        
+        // 更新数据库级别统计（第一级展示）
+        updateDatabaseStats: function(databaseStats, tableStats) {
+            const placeholder = document.getElementById('incrementalTablePlaceholder');
+            if (!placeholder) return;
+            
+            if (!databaseStats || databaseStats.length === 0) {
+                placeholder.innerHTML = '<div class="text-muted text-center mt-3">暂无统计数据</div>';
+                return;
+            }
+            
+            // 检查是否已经存在表格，如果存在则只更新数据，不重新渲染
+            const existingTable = placeholder.querySelector('.incremental-database-container');
+            if (existingTable) {
+                // 只更新数据，保持展开状态
+                this.updateDatabaseStatsData(databaseStats, tableStats);
+                return;
+            }
+            
+            // 首次渲染：创建完整的表格结构
+            placeholder.innerHTML = `
+                <div class="incremental-database-container mt-3">
+                    <h6 class="mb-2">同步统计</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th width="40"></th>
+                                    <th>数据库</th>
+                                    <th>表数量</th>
+                                    <th>全量同步进度</th>
+                                    <th>历史增量</th>
+                                    <th>今日增量</th>
+                                    <th>INSERT</th>
+                                    <th>UPDATE</th>
+                                    <th>DELETE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="databaseStatsBody">
+                                ${databaseStats.map(db => `
+                                    <tr class="database-row" data-database="${db.database}">
+                                        <td>
+                                            <i class="bi bi-chevron-right expand-icon" style="cursor: pointer;"></i>
+                                        </td>
+                                        <td><strong>${db.database}</strong></td>
+                                        <td>${db.table_count || 0}</td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <span class="me-2">${db.full_sync_progress ? db.full_sync_progress.toFixed(2) + '%' : '0%'}</span>
+                                                <div class="progress flex-grow-1" style="height: 8px; max-width: 100px;">
+                                                    <div class="progress-bar" role="progressbar" 
+                                                         style="width: ${db.full_sync_progress || 0}%"
+                                                         aria-valuenow="${db.full_sync_progress || 0}" 
+                                                         aria-valuemin="0" aria-valuemax="100"></div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>${this.formatNumber(db.total_count || 0)}</td>
+                                        <td>${this.formatNumber(db.today_count || 0)}</td>
+                                        <td class="text-success">${this.formatNumber(db.total_insert_count || 0)}</td>
+                                        <td class="text-primary">${this.formatNumber(db.total_update_count || 0)}</td>
+                                        <td class="text-danger">${this.formatNumber(db.total_delete_count || 0)}</td>
+                                    </tr>
+                                    <tr class="table-detail-row" data-database="${db.database}" style="display: none;">
+                                        <td colspan="9">
+                                            <div class="table-detail-container p-3 bg-light">
+                                                <div class="text-muted text-center">加载中...</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            // 绑定展开/收起事件
+            this.bindDatabaseExpandEvents();
+            
+            // 如果有表明细数据，更新对应的展开行
+            if (tableStats && tableStats.length > 0) {
+                this.updateTableDetails(tableStats);
+            }
+        },
+        
+        // 更新数据库统计数据（不重新渲染，保持展开状态）
+        updateDatabaseStatsData: function(databaseStats, tableStats) {
+            databaseStats.forEach(db => {
+                const row = document.querySelector(`.database-row[data-database="${db.database}"]`);
+                if (!row) return;
+                
+                // 更新数据（跳过第一列的展开图标）
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 9) {
+                    cells[2].textContent = db.table_count || 0;
+                    
+                    // 更新全量同步进度
+                    const progressText = cells[3].querySelector('span');
+                    const progressBar = cells[3].querySelector('.progress-bar');
+                    if (progressText) {
+                        progressText.textContent = db.full_sync_progress ? db.full_sync_progress.toFixed(2) + '%' : '0%';
+                    }
+                    if (progressBar) {
+                        const progress = db.full_sync_progress || 0;
+                        progressBar.style.width = progress + '%';
+                        progressBar.setAttribute('aria-valuenow', progress);
+                    }
+                    
+                    cells[4].textContent = this.formatNumber(db.total_count || 0);
+                    cells[5].textContent = this.formatNumber(db.today_count || 0);
+                    cells[6].textContent = this.formatNumber(db.total_insert_count || 0);
+                    cells[7].textContent = this.formatNumber(db.total_update_count || 0);
+                    cells[8].textContent = this.formatNumber(db.total_delete_count || 0);
+                }
+            });
+            
+            // 如果有表明细数据，更新对应的展开行
+            if (tableStats && tableStats.length > 0) {
+                this.updateTableDetails(tableStats);
+            }
+        },
+        
+        // 绑定数据库展开/收起事件
+        bindDatabaseExpandEvents: function() {
+            const rows = document.querySelectorAll('.database-row');
+            rows.forEach(row => {
+                const expandIcon = row.querySelector('.expand-icon');
+                if (!expandIcon) return;
+                
+                expandIcon.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const database = row.dataset.database;
+                    const detailRow = document.querySelector(`.table-detail-row[data-database="${database}"]`);
+                    
+                    if (!detailRow) return;
+                    
+                    const isExpanded = detailRow.style.display !== 'none';
+                    
+                    if (isExpanded) {
+                        // 收起
+                        detailRow.style.display = 'none';
+                        expandIcon.classList.remove('bi-chevron-down');
+                        expandIcon.classList.add('bi-chevron-right');
+                        
+                        // 断开旧的SSE连接，重新连接不带database参数的
+                        if (window.TaskMonitorProgressSSE && this.currentTask) {
+                            window.TaskMonitorProgressSSE.switchDatabase(this.currentTask.id, null);
+                        }
+                    } else {
+                        // 先收起其他所有展开的行
+                        document.querySelectorAll('.table-detail-row').forEach(r => {
+                            r.style.display = 'none';
+                        });
+                        document.querySelectorAll('.expand-icon').forEach(icon => {
+                            icon.classList.remove('bi-chevron-down');
+                            icon.classList.add('bi-chevron-right');
+                        });
+                        
+                        // 展开当前行
+                        detailRow.style.display = '';
+                        expandIcon.classList.remove('bi-chevron-right');
+                        expandIcon.classList.add('bi-chevron-down');
+                        
+                        // 切换SSE连接，带上database参数
+                        if (window.TaskMonitorProgressSSE && this.currentTask) {
+                            window.TaskMonitorProgressSSE.switchDatabase(this.currentTask.id, database);
+                        }
+                    }
+                });
+            });
+        },
+        
+        // 更新表明细（第二级展示）
+        updateTableDetails: function(tableStats) {
+            if (!tableStats || tableStats.length === 0) return;
+            
+            // 按数据库分组
+            const groupedByDatabase = {};
+            tableStats.forEach(table => {
+                if (!groupedByDatabase[table.database]) {
+                    groupedByDatabase[table.database] = [];
+                }
+                groupedByDatabase[table.database].push(table);
+            });
+            
+            // 更新每个数据库的表明细
+            Object.keys(groupedByDatabase).forEach(database => {
+                const detailRow = document.querySelector(`.table-detail-row[data-database="${database}"]`);
+                if (!detailRow) return;
+                
+                const container = detailRow.querySelector('.table-detail-container');
+                if (!container) return;
+                
+                const tables = groupedByDatabase[database];
+                container.innerHTML = `
+                    <table class="table table-sm table-bordered mb-0" style="font-size: 0.875rem;">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="min-width: 150px;">表名</th>
+                                <th style="min-width: 100px;">全量总数</th>
+                                <th style="min-width: 120px;">全量进度</th>
+                                <th style="min-width: 80px;">历史增量</th>
+                                <th style="min-width: 80px;">今日增量</th>
+                                <th style="min-width: 70px;" class="text-success">INSERT</th>
+                                <th style="min-width: 70px;" class="text-primary">UPDATE</th>
+                                <th style="min-width: 70px;" class="text-danger">DELETE</th>
+                                <th style="min-width: 80px;">复制延迟</th>
+                                <th style="min-width: 140px;">最后增量时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tables.map(t => `
+                                <tr>
+                                    <td><strong>${t.table}</strong></td>
+                                    <td>${this.formatNumber(t.full_sync_total_records || 0)}</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <span class="me-2" style="min-width: 45px;">${t.full_sync_progress ? t.full_sync_progress.toFixed(1) + '%' : '0%'}</span>
+                                            <div class="progress flex-grow-1" style="height: 6px; max-width: 60px;">
+                                                <div class="progress-bar bg-success" role="progressbar" 
+                                                     style="width: ${t.full_sync_progress || 0}%"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>${this.formatNumber(t.total_count || 0)}</td>
+                                    <td>${this.formatNumber(t.today_count || 0)}</td>
+                                    <td class="text-success"><strong>${this.formatNumber(t.insert_count || 0)}</strong></td>
+                                    <td class="text-primary"><strong>${this.formatNumber(t.update_count || 0)}</strong></td>
+                                    <td class="text-danger"><strong>${this.formatNumber(t.delete_count || 0)}</strong></td>
+                                    <td>${t.replication_lag_seconds || 0} ms</td>
+                                    <td style="font-size: 0.8rem;">${t.last_event_time && t.last_event_time !== '0001-01-01T00:00:00Z' ? this.formatDateTime(t.last_event_time) : '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            });
         },
         
         // 更新增量表格（增量更新，不重新渲染整个表格）

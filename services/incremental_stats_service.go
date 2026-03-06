@@ -28,6 +28,20 @@ type IncrementalTableStats struct {
 	FullSyncProgress         float64 `json:"full_sync_progress"`          // 全量同步进度百分比
 }
 
+// IncrementalDatabaseStats 增量同步数据库级别统计（合计）
+type IncrementalDatabaseStats struct {
+	Database                 string  `json:"database"`                    // 数据库名
+	TotalInsertCount         int64   `json:"total_insert_count"`          // 总 INSERT 数量
+	TotalUpdateCount         int64   `json:"total_update_count"`          // 总 UPDATE 数量
+	TotalDeleteCount         int64   `json:"total_delete_count"`          // 总 DELETE 数量
+	TotalCount               int64   `json:"total_count"`                 // 总事件数
+	TodayCount               int64   `json:"today_count"`                 // 今日处理数量
+	TableCount               int     `json:"table_count"`                 // 表数量
+	FullSyncTotalRecords     int64   `json:"full_sync_total_records"`     // 全量同步总记录数
+	FullSyncProcessedRecords int64   `json:"full_sync_processed_records"` // 全量同步已处理记录数
+	FullSyncProgress         float64 `json:"full_sync_progress"`          // 全量同步进度百分比
+}
+
 // IncrementalTaskStats 增量同步任务统计
 type IncrementalTaskStats struct {
 	TaskID                string    `json:"task_id"`                 // 任务ID
@@ -375,6 +389,39 @@ func (s *IncrementalStatsService) InitTableStatsFromConfig(taskID string, task *
 	return statsList
 }
 
+// InitDatabaseStatsFromConfig 从任务配置初始化数据库统计（用于任务未启动时）
+func (s *IncrementalStatsService) InitDatabaseStatsFromConfig(taskID string, task *models.SyncTask) []*IncrementalDatabaseStats {
+	// 解析任务配置
+	var config struct {
+		SelectedDatabases []struct {
+			Database       string `json:"database"`
+			SourceDatabase string `json:"source_database"`
+			Tables         []struct {
+				SourceTable string `json:"source_table"`
+				TargetTable string `json:"target_table"`
+			} `json:"tables"`
+		} `json:"selected_databases"`
+	}
+
+	if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
+		return []*IncrementalDatabaseStats{}
+	}
+
+	var statsList []*IncrementalDatabaseStats
+	for _, dbSel := range config.SelectedDatabases {
+		// 使用目标数据库名
+		targetDB := dbSel.Database
+
+		stats := &IncrementalDatabaseStats{
+			Database:   targetDB,
+			TableCount: len(dbSel.Tables),
+		}
+		statsList = append(statsList, stats)
+	}
+
+	return statsList
+}
+
 // ClearTaskStats 清理任务统计（任务停止时调用）
 func (s *IncrementalStatsService) ClearTaskStats(taskID string) error {
 	if database.RedisClient == nil {
@@ -399,4 +446,66 @@ func (s *IncrementalStatsService) ClearTaskStats(taskID string) error {
 	database.RedisClient.Del(s.ctx, listKey)
 
 	return nil
+}
+
+// GetDatabaseStatsList 获取数据库级别的统计列表（合计）
+func (s *IncrementalStatsService) GetDatabaseStatsList(taskID string) ([]*IncrementalDatabaseStats, error) {
+	// 先获取所有表的统计
+	tableStats, err := s.GetTableStatsList(taskID)
+	if err != nil {
+		return []*IncrementalDatabaseStats{}, err
+	}
+
+	// 按数据库分组合计
+	dbStatsMap := make(map[string]*IncrementalDatabaseStats)
+
+	for _, tableStat := range tableStats {
+		dbName := tableStat.Database
+
+		if _, exists := dbStatsMap[dbName]; !exists {
+			dbStatsMap[dbName] = &IncrementalDatabaseStats{
+				Database: dbName,
+			}
+		}
+
+		dbStats := dbStatsMap[dbName]
+		dbStats.TotalInsertCount += tableStat.InsertCount
+		dbStats.TotalUpdateCount += tableStat.UpdateCount
+		dbStats.TotalDeleteCount += tableStat.DeleteCount
+		dbStats.TotalCount += tableStat.TotalCount
+		dbStats.TodayCount += tableStat.TodayCount
+		dbStats.TableCount++
+		dbStats.FullSyncTotalRecords += tableStat.FullSyncTotalRecords
+		dbStats.FullSyncProcessedRecords += tableStat.FullSyncProcessedRecords
+	}
+
+	// 计算每个数据库的全量同步进度
+	var result []*IncrementalDatabaseStats
+	for _, dbStats := range dbStatsMap {
+		if dbStats.FullSyncTotalRecords > 0 {
+			dbStats.FullSyncProgress = float64(dbStats.FullSyncProcessedRecords) / float64(dbStats.FullSyncTotalRecords) * 100
+		}
+		result = append(result, dbStats)
+	}
+
+	return result, nil
+}
+
+// GetTableStatsListByDatabase 获取指定数据库下的表统计列表
+func (s *IncrementalStatsService) GetTableStatsListByDatabase(taskID, database string) ([]*IncrementalTableStats, error) {
+	// 获取所有表统计
+	allTableStats, err := s.GetTableStatsList(taskID)
+	if err != nil {
+		return []*IncrementalTableStats{}, err
+	}
+
+	// 过滤出指定数据库的表
+	var result []*IncrementalTableStats
+	for _, tableStat := range allTableStats {
+		if tableStat.Database == database {
+			result = append(result, tableStat)
+		}
+	}
+
+	return result, nil
 }

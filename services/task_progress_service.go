@@ -31,12 +31,16 @@ type TaskProgress struct {
 	TotalRecords     *int64   `json:"total_records,omitempty"`
 	ProcessedRecords *int64   `json:"processed_records,omitempty"`
 
-	// 增量同步表统计（仅 sync_mode=incremental 时有值）
+	// 增量同步数据库级别统计（仅 sync_mode=incremental 时有值，始终返回）
+	DatabaseStats []*IncrementalDatabaseStats `json:"database_stats,omitempty"`
+
+	// 增量同步表明细统计（仅 sync_mode=incremental 且指定 database 参数时有值）
 	TableStats []*IncrementalTableStats `json:"table_stats,omitempty"`
 }
 
 // GetTaskProgress 获取任务进度
-func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, error) {
+// dbName 参数可选，如果提供则同时返回该数据库的表明细
+func (s *TaskProgressService) GetTaskProgress(taskID string, dbName string) (*TaskProgress, error) {
 	// 查询任务
 	var task models.SyncTask
 	if err := database.DB.First(&task, "id = ?", taskID).Error; err != nil {
@@ -52,8 +56,14 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 
 	// 根据同步模式返回不同的数据
 	if task.SyncMode == "incremental" {
-		// 增量同步模式：始终返回表明细
-		progress.TableStats = s.getIncrementalTableStats(taskID, &task)
+		// 增量同步模式：始终返回数据库级别统计
+		progress.DatabaseStats = s.getIncrementalDatabaseStats(taskID, &task)
+
+		// 如果指定了 dbName 参数，则返回该数据库的表明细
+		if dbName != "" {
+			tableStats, _ := s.GetTaskProgressByDatabase(taskID, dbName)
+			progress.TableStats = tableStats
+		}
 	} else {
 		// 全量同步模式：返回整体进度
 		s.fillFullSyncProgress(taskID, &task, progress)
@@ -62,7 +72,78 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 	return progress, nil
 }
 
-// getIncrementalTableStats 获取增量同步的表明细统计
+// getIncrementalDatabaseStats 获取增量同步的数据库级别统计（合计）
+func (s *TaskProgressService) getIncrementalDatabaseStats(taskID string, task *models.SyncTask) []*IncrementalDatabaseStats {
+	statsService := NewIncrementalStatsService()
+
+	// 从Redis获取数据库级别统计
+	dbStats, _ := statsService.GetDatabaseStatsList(taskID)
+
+	// 如果 Redis 中没有数据，从任务配置中初始化数据库列表
+	if len(dbStats) == 0 {
+		dbStats = statsService.InitDatabaseStatsFromConfig(taskID, task)
+	}
+
+	// 从内存合并全量进度
+	dbStats = s.mergeMemoryProgressToDatabaseStats(taskID, dbStats)
+
+	return dbStats
+}
+
+// mergeMemoryProgressToDatabaseStats 将内存中的全量进度合并到数据库统计
+func (s *TaskProgressService) mergeMemoryProgressToDatabaseStats(taskID string, dbStats []*IncrementalDatabaseStats) []*IncrementalDatabaseStats {
+	progressManager := GetProgressManager()
+	units := progressManager.GetUnits(taskID)
+
+	if units == nil {
+		return dbStats
+	}
+
+	// 按数据库分组统计全量进度
+	dbProgressMap := make(map[string]struct {
+		totalRecords     int64
+		processedRecords int64
+	})
+
+	for _, unit := range units {
+		// 从 unitName 中提取数据库名（格式：database.table）
+		dbName := ""
+		for i := 0; i < len(unit.UnitName); i++ {
+			if unit.UnitName[i] == '.' {
+				dbName = unit.UnitName[:i]
+				break
+			}
+		}
+
+		if dbName == "" {
+			continue
+		}
+
+		progress := dbProgressMap[dbName]
+		progress.totalRecords += unit.TotalRecords
+		progress.processedRecords += unit.ProcessedRecords
+		dbProgressMap[dbName] = progress
+	}
+
+	// 合并到数据库统计
+	for _, stats := range dbStats {
+		if progress, exists := dbProgressMap[stats.Database]; exists {
+			stats.FullSyncTotalRecords = progress.totalRecords
+			stats.FullSyncProcessedRecords = progress.processedRecords
+
+			// 计算进度
+			if progress.totalRecords > 0 {
+				stats.FullSyncProgress = float64(progress.processedRecords) / float64(progress.totalRecords) * 100
+			} else {
+				stats.FullSyncProgress = 0
+			}
+		}
+	}
+
+	return dbStats
+}
+
+// getIncrementalTableStats 获取增量同步的表明细统计（用于展开数据库时调用）
 func (s *TaskProgressService) getIncrementalTableStats(taskID string, task *models.SyncTask) []*IncrementalTableStats {
 	statsService := NewIncrementalStatsService()
 
@@ -193,4 +274,38 @@ func formatDuration(d time.Duration) string {
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+
+// GetTaskProgressByDatabase 获取指定数据库下的表明细进度
+func (s *TaskProgressService) GetTaskProgressByDatabase(taskID, dbName string) ([]*IncrementalTableStats, error) {
+	// 查询任务
+	var task models.SyncTask
+	if err := database.DB.First(&task, "id = ?", taskID).Error; err != nil {
+		return nil, fmt.Errorf("任务不存在")
+	}
+
+	// 只支持增量模式
+	if task.SyncMode != "incremental" {
+		return nil, fmt.Errorf("只有增量模式支持按数据库查询表明细")
+	}
+
+	statsService := NewIncrementalStatsService()
+
+	// 从Redis获取指定数据库的表统计
+	tableStats, _ := statsService.GetTableStatsListByDatabase(taskID, dbName)
+
+	// 如果 Redis 中没有数据，从任务配置中初始化
+	if len(tableStats) == 0 {
+		allTableStats := statsService.InitTableStatsFromConfig(taskID, &task)
+		for _, stats := range allTableStats {
+			if stats.Database == dbName {
+				tableStats = append(tableStats, stats)
+			}
+		}
+	}
+
+	// 从内存合并全量进度
+	tableStats = s.mergeMemoryProgressToTableStats(taskID, tableStats)
+
+	return tableStats, nil
 }

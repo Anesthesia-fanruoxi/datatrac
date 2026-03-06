@@ -145,6 +145,9 @@ func (api *TaskSSEAPI) StreamTaskDetail(c *gin.Context) {
 func (api *TaskSSEAPI) StreamProgress(c *gin.Context) {
 	taskID := c.Param("id")
 
+	// 获取 database 查询参数（可选）
+	dbName := c.Query("database")
+
 	// 设置SSE响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -154,8 +157,8 @@ func (api *TaskSSEAPI) StreamProgress(c *gin.Context) {
 	// 创建客户端通道
 	client := make(chan services.SSEMessage, 10)
 
-	// 添加到进度客户端列表
-	api.sseService.AddProgressClient(taskID, client)
+	// 添加到进度客户端列表（传递 database 参数）
+	api.sseService.AddProgressClient(taskID, client, dbName)
 
 	// 确保清理资源
 	defer func() {
@@ -174,8 +177,8 @@ func (api *TaskSSEAPI) StreamProgress(c *gin.Context) {
 	// 创建退出信号通道
 	done := make(chan struct{})
 
-	// 启动推送协程（推送统一进度）
-	go api.sseService.StreamProgress(taskID, client, done)
+	// 启动推送协程（推送统一进度，传递 database 参数）
+	go api.sseService.StreamProgress(taskID, dbName, client, done)
 
 	// 监听客户端断开
 	notify := c.Request.Context().Done()
