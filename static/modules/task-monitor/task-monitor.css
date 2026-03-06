@@ -7,7 +7,7 @@
 
 /* 左侧任务列表 */
 .task-list-panel {
-    width: 300px;
+    width: 150px;
     background: white;
     border-right: 1px solid #e2e8f0;
     display: flex;
@@ -125,7 +125,7 @@
 
 /* 进度面板 */
 .progress-panel {
-    flex: 1;
+    flex: 1.2;
     background: white;
     border-radius: 10px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -185,7 +185,7 @@
 
 /* 日志面板 */
 .log-panel {
-    flex: 1;
+    flex: 0.8;
     background: white;
     border-radius: 10px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -482,7 +482,28 @@
     border-radius: 8px;
 }
 
+.incremental-table-container .table-responsive {
+    overflow-x: hidden;
+}
+
+.incremental-database-container {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.incremental-database-container .table-responsive {
+    overflow-x: hidden;
+}
+
 .incremental-table-container h6 {
+    color: #667eea;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.incremental-database-container h6 {
     color: #667eea;
     font-weight: 600;
     margin-bottom: 15px;
@@ -492,9 +513,22 @@
     background: white;
     margin-bottom: 0;
     font-size: 13px;
+    border: 1px solid #e2e8f0;
+}
+
+.incremental-database-container .table {
+    background: white;
+    margin-bottom: 0;
+    font-size: 13px;
+    border: 1px solid #e2e8f0;
 }
 
 .incremental-table-container .table thead {
+    background: #667eea;
+    color: white;
+}
+
+.incremental-database-container .table thead {
     background: #667eea;
     color: white;
 }
@@ -503,18 +537,73 @@
     border: none;
     padding: 10px 8px;
     font-weight: 500;
+    border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.incremental-database-container .table thead th {
+    border: none;
+    padding: 10px 8px;
+    font-weight: 500;
+    border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.incremental-table-container .table thead th:last-child {
+    border-right: none;
+}
+
+.incremental-database-container .table thead th:last-child {
+    border-right: none;
 }
 
 .incremental-table-container .table tbody td {
     padding: 8px;
     vertical-align: middle;
+    border: 1px solid #e2e8f0;
 }
 
-.incremental-table-container .table tbody tr:hover {
-    background: #f1f5f9;
+.incremental-database-container .table tbody td {
+    padding: 8px;
+    vertical-align: middle;
+    border: 1px solid #e2e8f0;
 }
 
 .incremental-table-container .badge {
     font-size: 11px;
     padding: 4px 8px;
+}
+
+.incremental-database-container .badge {
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+/* 表格明细行样式优化 */
+.table-detail-container .table {
+    border: 1px solid #e2e8f0;
+}
+
+.table-detail-container .table thead th {
+    border-right: 1px solid #e2e8f0;
+}
+
+.table-detail-container .table thead th:last-child {
+    border-right: none;
+}
+
+.table-detail-container .table tbody td {
+    border: 1px solid #e2e8f0;
+}
+
+/* 数据库行展开图标样式 */
+.database-row .expand-icon {
+    transition: transform 0.2s ease;
+}
+
+.database-row td {
+    border: 1px solid #e2e8f0;
+}
+
+.table-detail-row td {
+    border: none;
+    padding: 0;
 }
