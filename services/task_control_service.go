@@ -99,6 +99,7 @@ func (s *TaskControlService) StopTask(taskID string) error {
 
 	execManager := GetExecutionManager()
 	progressManager := GetProgressManager()
+	statsService := NewIncrementalStatsService()
 
 	// 2. 根据同步模式处理
 	if task.SyncMode == "incremental" {
@@ -113,6 +114,12 @@ func (s *TaskControlService) StopTask(taskID string) error {
 			// 清理增量同步实例
 			execManager.DeleteIncrementalSync(taskID)
 		}
+
+		// 清理Redis增量统计数据
+		statsService.ClearTaskStats(taskID)
+
+		// 注意：不清除内存中的全量进度数据，因为增量阶段还需要显示全量进度
+		// progressManager.ClearTask(taskID) // 已删除
 	} else {
 		// 处理全量同步停止
 		if task.IsRunning {

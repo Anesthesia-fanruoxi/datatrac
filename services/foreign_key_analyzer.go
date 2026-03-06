@@ -40,11 +40,8 @@ func (ts *TableSorter) AnalyzeForeignKeys(database string, tables []string) ([]F
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	fmt.Printf("[DEBUG] 数据库 %s: 执行外键查询 SQL\n", database)
-
 	rows, err := ts.db.QueryContext(ctx, query, database)
 	if err != nil {
-		fmt.Printf("[DEBUG] 数据库 %s: 查询失败: %v\n", database, err)
 		return nil, fmt.Errorf("查询外键关系失败: %w", err)
 	}
 	defer rows.Close()
@@ -58,37 +55,26 @@ func (ts *TableSorter) AnalyzeForeignKeys(database string, tables []string) ([]F
 	allRelations := 0
 	keptRelations := 0
 
-	fmt.Printf("[DEBUG] 数据库 %s: 开始查询外键关系, 同步表列表: %v\n", database, tables)
-
 	for rows.Next() {
 		var rel ForeignKeyRelation
 		if err := rows.Scan(&rel.ChildTable, &rel.ParentTable); err != nil {
-			fmt.Printf("[DEBUG] 数据库 %s: 扫描失败: %v\n", database, err)
 			return nil, fmt.Errorf("扫描外键关系失败: %w", err)
 		}
 
 		allRelations++
-		fmt.Printf("[DEBUG] 数据库 %s: 发现外键 %s -> %s\n", database, rel.ChildTable, rel.ParentTable)
 
 		// 只要子表在同步列表中,就保留这个外键关系
 		// 因为删除子表时需要知道它依赖哪些父表
 		if tableSet[rel.ChildTable] {
 			relations = append(relations, rel)
 			keptRelations++
-			fmt.Printf("[DEBUG] 数据库 %s: 保留外键 %s -> %s (子表在同步列表中)\n", database, rel.ChildTable, rel.ParentTable)
-		} else {
-			fmt.Printf("[DEBUG] 数据库 %s: 跳过外键 %s -> %s (子表不在同步列表中)\n", database, rel.ChildTable, rel.ParentTable)
 		}
 	}
 
 	// 检查是否有扫描错误
 	if err := rows.Err(); err != nil {
-		fmt.Printf("[DEBUG] 数据库 %s: 行扫描错误: %v\n", database, err)
 		return nil, fmt.Errorf("行扫描错误: %w", err)
 	}
-
-	// 调试日志:显示最终结果
-	fmt.Printf("[DEBUG] 数据库 %s: 查询到 %d 个外键关系, 保留 %d 个\n", database, allRelations, keptRelations)
 
 	return relations, nil
 }

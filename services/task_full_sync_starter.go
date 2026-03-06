@@ -22,7 +22,6 @@ func (s *TaskControlService) startFullSyncTask(taskID string) error {
 	logDir := filepath.Join("logs", taskID)
 	if _, err := os.Stat(logDir); err == nil {
 		os.RemoveAll(logDir)
-		fmt.Printf("已清除任务 %s 的旧日志文件\n", taskID)
 	}
 
 	// 创建日志服务
@@ -242,7 +241,6 @@ func (s *TaskControlService) startIncrementalTask(taskID string) error {
 	logDir := filepath.Join("logs", taskID)
 	if _, err := os.Stat(logDir); err == nil {
 		os.RemoveAll(logDir)
-		fmt.Printf("已清除任务 %s 的旧日志文件\n", taskID)
 	}
 
 	// 创建日志服务

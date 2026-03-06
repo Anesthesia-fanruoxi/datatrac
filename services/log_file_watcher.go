@@ -44,9 +44,7 @@ func NewLogFileWatcher(taskID string, category string, client chan SSEMessage, d
 // Start 启动监听
 func (w *LogFileWatcher) Start() error {
 	// 1. 读取文件最后1000行（初始数据）
-	if err := w.sendInitialLogs(); err != nil {
-		fmt.Printf("发送初始日志失败: %v\n", err)
-	}
+	w.sendInitialLogs()
 
 	// 2. 确保文件存在
 	if err := w.ensureFileExists(); err != nil {
@@ -131,11 +129,10 @@ func (w *LogFileWatcher) watchLoop() {
 				w.readNewContent()
 			}
 
-		case err, ok := <-w.watcher.Errors:
+		case _, ok := <-w.watcher.Errors:
 			if !ok {
 				return
 			}
-			fmt.Printf("文件监听错误: %v\n", err)
 		}
 	}
 }
@@ -144,14 +141,12 @@ func (w *LogFileWatcher) watchLoop() {
 func (w *LogFileWatcher) readNewContent() {
 	file, err := os.Open(w.filePath)
 	if err != nil {
-		fmt.Printf("打开文件失败: %v\n", err)
 		return
 	}
 	defer file.Close()
 
 	// 跳到上次读取的位置
 	if _, err := file.Seek(w.offset, 0); err != nil {
-		fmt.Printf("文件seek失败: %v\n", err)
 		return
 	}
 
@@ -175,7 +170,6 @@ func (w *LogFileWatcher) readNewContent() {
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("读取文件失败: %v\n", err)
 		return
 	}
 

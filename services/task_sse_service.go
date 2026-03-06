@@ -258,15 +258,11 @@ func (s *TaskSSEService) StreamLogs(taskID string, category string, client chan 
 	// 创建日志文件监听器
 	watcher, err := NewLogFileWatcher(taskID, category, client, done)
 	if err != nil {
-		fmt.Printf("创建日志文件监听器失败: %v\n", err)
 		return
 	}
 
 	// 启动监听
-	if err := watcher.Start(); err != nil {
-		fmt.Printf("启动日志文件监听失败: %v\n", err)
-		return
-	}
+	watcher.Start()
 
 	// 保持连接，等待客户端断开
 	<-done
@@ -471,22 +467,15 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 	clients, ok := s.progressClients[taskID]
 	s.mu.RUnlock()
 
-	fmt.Printf("[DEBUG] BroadcastProgressUpdate - taskID: %s, 客户端数量: %d\n", taskID, len(clients))
-
 	if !ok || len(clients) == 0 {
-		fmt.Printf("[DEBUG] BroadcastProgressUpdate - 没有进度客户端,跳过推送\n")
 		return
 	}
 
 	// 获取最新进度
 	progress, err := s.progressService.GetTaskProgress(taskID)
 	if err != nil {
-		fmt.Printf("[DEBUG] BroadcastProgressUpdate - 获取进度失败: %v\n", err)
 		return
 	}
-
-	fmt.Printf("[DEBUG] BroadcastProgressUpdate - 进度数据: sync_mode=%s, current_step=%s\n",
-		progress.SyncMode, progress.CurrentStep)
 
 	// 向所有进度客户端发送更新
 	sentCount := 0
@@ -495,7 +484,6 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 			defer func() {
 				if r := recover(); r != nil {
 					// channel 已关闭，忽略错误
-					fmt.Printf("[DEBUG] BroadcastProgressUpdate - 发送失败(channel已关闭)\n")
 				}
 			}()
 			select {
@@ -506,12 +494,9 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 				sentCount++
 			default:
 				// 客户端缓冲区满，跳过
-				fmt.Printf("[DEBUG] BroadcastProgressUpdate - 客户端缓冲区满,跳过\n")
 			}
 		}(client)
 	}
-
-	fmt.Printf("[DEBUG] BroadcastProgressUpdate - 成功发送给 %d 个客户端\n", sentCount)
 }
 
 // BroadcastTaskDetailUpdate 广播任务详情更新

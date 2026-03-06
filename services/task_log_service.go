@@ -85,7 +85,6 @@ func (s *TaskLogService) AddLog(taskID string, level string, message string, cat
 
 	// 确保日志目录存在
 	if err := s.ensureLogDir(taskID); err != nil {
-		fmt.Printf("创建日志目录失败: %v\n", err)
 		return
 	}
 
@@ -120,14 +119,11 @@ func (s *TaskLogService) appendToFile(taskID string, category string, content st
 
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Printf("打开日志文件失败: %v\n", err)
 		return
 	}
 	defer file.Close()
 
-	if _, err := file.WriteString(content + "\n"); err != nil {
-		fmt.Printf("写入日志文件失败: %v\n", err)
-	}
+	file.WriteString(content + "\n")
 }
 
 // formatLogTime 格式化日志时间
@@ -205,32 +201,20 @@ func splitLines(content string) []string {
 
 // Info 记录信息日志
 func (s *TaskLogService) Info(taskID string, message string) {
-	// 添加到文件
 	s.AddLog(taskID, "info", message, "all")
-	// 打印到控制台
-	fmt.Printf("[INFO] [Task:%s] %s\n", taskID, message)
 }
 
 // Error 记录错误日志
 func (s *TaskLogService) Error(taskID string, message string) {
-	// 添加到文件
 	s.AddLog(taskID, "error", message, "all")
-	// 打印到控制台
-	fmt.Printf("[ERROR] [Task:%s] %s\n", taskID, message)
 }
 
 // Warning 记录警告日志
 func (s *TaskLogService) Warning(taskID string, message string) {
-	// 添加到文件
 	s.AddLog(taskID, "warning", message, "all")
-	// 打印到控制台
-	fmt.Printf("[WARNING] [Task:%s] %s\n", taskID, message)
 }
 
 // Success 记录成功日志
 func (s *TaskLogService) Success(taskID string, message string) {
-	// 添加到文件
 	s.AddLog(taskID, "success", message, "complete")
-	// 打印到控制台
-	fmt.Printf("[SUCCESS] [Task:%s] %s\n", taskID, message)
 }

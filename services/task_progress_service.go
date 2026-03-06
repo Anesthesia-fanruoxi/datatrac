@@ -50,92 +50,141 @@ func (s *TaskProgressService) GetTaskProgress(taskID string) (*TaskProgress, err
 		CurrentStep: task.CurrentStep,
 	}
 
-	// 根据当前步骤返回不同的数据
-	if task.SyncMode == "incremental" && task.CurrentStep == "incremental" {
-		// 增量同步阶段：从Redis返回表统计列表
-		statsService := NewIncrementalStatsService()
-		tableStats, _ := statsService.GetTableStatsList(taskID)
-
-		// 如果 Redis 中没有数据，从任务配置中初始化表列表
-		if len(tableStats) == 0 {
-			tableStats = statsService.InitTableStatsFromConfig(taskID, &task)
-		}
-
-		// 合并全量同步进度
-		progress.TableStats = statsService.MergeFullSyncProgress(taskID, tableStats, s)
+	// 根据同步模式返回不同的数据
+	if task.SyncMode == "incremental" {
+		// 增量同步模式：始终返回表明细
+		progress.TableStats = s.getIncrementalTableStats(taskID, &task)
 	} else {
-		// 全量同步阶段：从内存返回整体进度
-		progressManager := GetProgressManager()
-		taskData := progressManager.GetTask(taskID)
-
-		if taskData == nil {
-			// 任务未在运行，返回空进度
-			zero := 0
-			zeroInt64 := int64(0)
-			zeroFloat := 0.0
-			emptyStr := "00:00:00"
-			progress.OverallProgress = &zeroFloat
-			progress.SyncSpeed = &zeroInt64
-			progress.ElapsedTime = &emptyStr
-			progress.EstimatedTime = &emptyStr
-			progress.TotalTables = &zero
-			progress.CompletedTables = &zero
-			progress.TotalRecords = &zeroInt64
-			progress.ProcessedRecords = &zeroInt64
-			return progress, nil
-		}
-
-		// 统计各状态表数
-		total, completed, _, _, _, initialized := progressManager.GetTaskStats(taskID)
-
-		// 如果当前是初始化阶段，使用initializedCount作为completedCount
-		if task.CurrentStep == "initialize" {
-			completed = initialized
-		}
-
-		// 获取总体进度
-		totalRecords, processedRecords := progressManager.GetTotalProgress(taskID)
-
-		// 计算总体进度（基于记录数）
-		overallProgress := 0.0
-		if totalRecords > 0 {
-			overallProgress = float64(processedRecords) / float64(totalRecords) * 100
-		}
-
-		// 计算同步速度和时间
-		syncSpeed := int64(0)
-		elapsedTime := "00:00:00"
-		estimatedTime := "00:00:00"
-
-		earliestStartTime := progressManager.GetEarliestStartTime(taskID)
-		if earliestStartTime != nil {
-			elapsed := time.Since(*earliestStartTime)
-			elapsedTime = formatDuration(elapsed)
-
-			// 计算速度（条/秒）
-			if elapsed.Seconds() > 0 {
-				syncSpeed = int64(float64(processedRecords) / elapsed.Seconds())
-			}
-
-			// 估算剩余时间
-			if syncSpeed > 0 && totalRecords > processedRecords {
-				remaining := totalRecords - processedRecords
-				estimatedSeconds := float64(remaining) / float64(syncSpeed)
-				estimatedTime = formatDuration(time.Duration(estimatedSeconds) * time.Second)
-			}
-		}
-
-		progress.OverallProgress = &overallProgress
-		progress.SyncSpeed = &syncSpeed
-		progress.ElapsedTime = &elapsedTime
-		progress.EstimatedTime = &estimatedTime
-		progress.TotalTables = &total
-		progress.CompletedTables = &completed
-		progress.TotalRecords = &totalRecords
-		progress.ProcessedRecords = &processedRecords
+		// 全量同步模式：返回整体进度
+		s.fillFullSyncProgress(taskID, &task, progress)
 	}
 
 	return progress, nil
+}
+
+// getIncrementalTableStats 获取增量同步的表明细统计
+func (s *TaskProgressService) getIncrementalTableStats(taskID string, task *models.SyncTask) []*IncrementalTableStats {
+	statsService := NewIncrementalStatsService()
+
+	// 先从Redis获取表统计
+	tableStats, _ := statsService.GetTableStatsList(taskID)
+
+	// 如果 Redis 中没有数据，从任务配置中初始化表列表
+	if len(tableStats) == 0 {
+		tableStats = statsService.InitTableStatsFromConfig(taskID, task)
+	}
+
+	// 始终从内存合并全量进度（全量阶段和增量阶段都需要）
+	tableStats = s.mergeMemoryProgressToTableStats(taskID, tableStats)
+
+	return tableStats
+}
+
+// mergeMemoryProgressToTableStats 将内存中的全量进度合并到表统计
+func (s *TaskProgressService) mergeMemoryProgressToTableStats(taskID string, tableStats []*IncrementalTableStats) []*IncrementalTableStats {
+	progressManager := GetProgressManager()
+	units := progressManager.GetUnits(taskID)
+
+	if units == nil {
+		return tableStats
+	}
+
+	// 创建表名到运行时数据的映射
+	unitMap := make(map[string]*TaskUnit)
+	for _, unit := range units {
+		unitMap[unit.UnitName] = unit
+	}
+
+	// 合并数据
+	for _, stats := range tableStats {
+		tableName := fmt.Sprintf("%s.%s", stats.Database, stats.Table)
+
+		if unit, exists := unitMap[tableName]; exists {
+			stats.FullSyncTotalRecords = unit.TotalRecords
+			stats.FullSyncProcessedRecords = unit.ProcessedRecords
+
+			// 计算进度
+			if unit.TotalRecords > 0 {
+				stats.FullSyncProgress = float64(unit.ProcessedRecords) / float64(unit.TotalRecords) * 100
+			} else {
+				stats.FullSyncProgress = 0
+			}
+		}
+	}
+
+	return tableStats
+}
+
+// fillFullSyncProgress 填充全量同步的整体进度
+func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.SyncTask, progress *TaskProgress) {
+	progressManager := GetProgressManager()
+	taskData := progressManager.GetTask(taskID)
+
+	if taskData == nil {
+		// 任务未在运行，返回空进度
+		zero := 0
+		zeroInt64 := int64(0)
+		zeroFloat := 0.0
+		emptyStr := "00:00:00"
+		progress.OverallProgress = &zeroFloat
+		progress.SyncSpeed = &zeroInt64
+		progress.ElapsedTime = &emptyStr
+		progress.EstimatedTime = &emptyStr
+		progress.TotalTables = &zero
+		progress.CompletedTables = &zero
+		progress.TotalRecords = &zeroInt64
+		progress.ProcessedRecords = &zeroInt64
+		return
+	}
+
+	// 统计各状态表数
+	total, completed, _, _, _, initialized := progressManager.GetTaskStats(taskID)
+
+	// 如果当前是初始化阶段，使用initializedCount作为completedCount
+	if task.CurrentStep == "initialize" {
+		completed = initialized
+	}
+
+	// 获取总体进度
+	totalRecords, processedRecords := progressManager.GetTotalProgress(taskID)
+
+	// 计算总体进度（基于记录数）
+	overallProgress := 0.0
+	if totalRecords > 0 {
+		overallProgress = float64(processedRecords) / float64(totalRecords) * 100
+	}
+
+	// 计算同步速度和时间
+	syncSpeed := int64(0)
+	elapsedTime := "00:00:00"
+	estimatedTime := "00:00:00"
+
+	earliestStartTime := progressManager.GetEarliestStartTime(taskID)
+	if earliestStartTime != nil {
+		elapsed := time.Since(*earliestStartTime)
+		elapsedTime = formatDuration(elapsed)
+
+		// 计算速度（条/秒）
+		if elapsed.Seconds() > 0 {
+			syncSpeed = int64(float64(processedRecords) / elapsed.Seconds())
+		}
+
+		// 估算剩余时间
+		if syncSpeed > 0 && totalRecords > processedRecords {
+			remaining := totalRecords - processedRecords
+			estimatedSeconds := float64(remaining) / float64(syncSpeed)
+			estimatedTime = formatDuration(time.Duration(estimatedSeconds) * time.Second)
+		}
+	}
+
+	progress.OverallProgress = &overallProgress
+	progress.SyncSpeed = &syncSpeed
+	progress.ElapsedTime = &elapsedTime
+	progress.EstimatedTime = &estimatedTime
+	progress.TotalTables = &total
+	progress.CompletedTables = &completed
+	progress.TotalRecords = &totalRecords
+	progress.ProcessedRecords = &processedRecords
 }
 
 // formatDuration 格式化时间间隔为 HH:MM:SS

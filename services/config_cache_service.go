@@ -100,7 +100,6 @@ func (s *ConfigCacheService) DeleteTaskConfigFromRedis(taskID string) error {
 // InitAllTaskConfigs 服务启动时加载所有任务配置到Redis
 func (s *ConfigCacheService) InitAllTaskConfigs() error {
 	if !database.IsRedisEnabled() {
-		fmt.Println("⚠️  Redis未启用，跳过配置缓存初始化")
 		return nil
 	}
 
@@ -110,18 +109,10 @@ func (s *ConfigCacheService) InitAllTaskConfigs() error {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
 
-	fmt.Printf("🔄 开始加载 %d 个任务配置到Redis...\n", len(tasks))
-
-	successCount := 0
 	for _, task := range tasks {
-		if err := s.LoadTaskConfigToRedis(task.ID); err != nil {
-			fmt.Printf("⚠️  加载任务 %s 配置失败: %v\n", task.Name, err)
-		} else {
-			successCount++
-		}
+		s.LoadTaskConfigToRedis(task.ID)
 	}
 
-	fmt.Printf("✅ 成功加载 %d/%d 个任务配置到Redis\n", successCount, len(tasks))
 	return nil
 }
 
@@ -144,7 +135,6 @@ func (s *ConfigCacheService) GetTaskConfigWithFallback(taskID string) (*TaskConf
 		if err == nil {
 			return config, nil
 		}
-		fmt.Printf("⚠️  从Redis读取配置失败，尝试从MySQL读取: %v\n", err)
 	}
 
 	// 从MySQL读取
@@ -172,20 +162,14 @@ func (s *ConfigCacheService) ClearAllTaskConfigs() error {
 
 	// 使用SCAN命令遍历所有匹配的key
 	iter := database.RedisClient.Scan(ctx, 0, pattern, 0).Iterator()
-	count := 0
 	for iter.Next(ctx) {
-		if err := database.RedisClient.Del(ctx, iter.Val()).Err(); err != nil {
-			fmt.Printf("⚠️  删除key %s 失败: %v\n", iter.Val(), err)
-		} else {
-			count++
-		}
+		database.RedisClient.Del(ctx, iter.Val())
 	}
 
 	if err := iter.Err(); err != nil {
 		return fmt.Errorf("扫描Redis失败: %w", err)
 	}
 
-	fmt.Printf("✅ 清除了 %d 个任务配置\n", count)
 	return nil
 }
 

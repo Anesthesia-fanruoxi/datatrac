@@ -175,10 +175,7 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 
 	// 重新加载配置到Redis
 	configCache := NewConfigCacheService()
-	if err := configCache.ReloadTaskConfig(task.ID); err != nil {
-		fmt.Printf("⚠️  重新加载配置到Redis失败: %v\n", err)
-		// 不阻止配置更新
-	}
+	configCache.ReloadTaskConfig(task.ID)
 
 	return task, nil
 }
@@ -193,7 +190,6 @@ func (s *TaskService) clearRuntimeData(taskID string) {
 	logDir := filepath.Join("logs", taskID)
 	if _, err := os.Stat(logDir); err == nil {
 		os.RemoveAll(logDir)
-		fmt.Printf("已清除任务 %s 的日志文件\n", taskID)
 	}
 }
 
@@ -211,15 +207,11 @@ func (s *TaskService) Delete(id string) error {
 
 	// 清理 Redis 配置
 	configCache := NewConfigCacheService()
-	if err := configCache.DeleteTaskConfigFromRedis(id); err != nil {
-		fmt.Printf("清理 Redis 配置失败: %v\n", err)
-	}
+	configCache.DeleteTaskConfigFromRedis(id)
 
 	// 清理 Redis 增量统计数据
 	statsService := NewIncrementalStatsService()
-	if err := statsService.ClearTaskStats(id); err != nil {
-		fmt.Printf("清理 Redis 统计数据失败: %v\n", err)
-	}
+	statsService.ClearTaskStats(id)
 
 	// 删除任务本身
 	if err := database.DB.Delete(&models.SyncTask{}, "id = ?", id).Error; err != nil {

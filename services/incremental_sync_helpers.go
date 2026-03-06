@@ -201,6 +201,11 @@ func (s *IncrementalSync) startBinlogListener(snapshot *BinlogSnapshot) error {
 func (s *IncrementalSync) executeFullSync() error {
 	s.logService.Info(s.taskID, "========== 开始全量同步阶段 ==========")
 
+	// 0. 清理旧的Redis统计数据（避免显示旧的源表统计）
+	statsService := NewIncrementalStatsService()
+	statsService.ClearTaskStats(s.taskID)
+	s.logService.Info(s.taskID, "已清理旧的Redis统计数据")
+
 	// 1. 从Redis获取配置
 	configCache := NewConfigCacheService()
 	config, err := configCache.GetTaskConfigWithFallback(s.taskID)
@@ -235,7 +240,19 @@ func (s *IncrementalSync) executeFullSync() error {
 	progressManager := GetProgressManager()
 	progressManager.InitTask(s.taskID, unitNames)
 
-	// 4. 外键分析和排序
+	// 4. 初始化Redis表统计结构（用于SSE推送，使用目标表名）
+	for _, db := range config.SelectedDatabases {
+		targetDB := db.Database
+		for _, tableConfig := range db.Tables {
+			targetTable := tableConfig.TargetTable
+			if targetTable == "" {
+				targetTable = tableConfig.SourceTable
+			}
+			statsService.InitTableStats(s.taskID, targetDB, targetTable)
+		}
+	}
+
+	// 5. 外键分析和排序
 	s.logService.Info(s.taskID, "开始分析表的外键依赖关系...")
 
 	fkSorter := NewTaskForeignKeySorter()
@@ -251,7 +268,7 @@ func (s *IncrementalSync) executeFullSync() error {
 		s.logService.Info(s.taskID, "未检测到外键依赖")
 	}
 
-	// 5. 更新任务步骤
+	// 6. 更新任务步骤
 	database.DB.Model(&models.SyncTask{}).
 		Where("id = ?", s.taskID).
 		Update("current_step", "initialize")
@@ -260,10 +277,10 @@ func (s *IncrementalSync) executeFullSync() error {
 	// 广播任务详情更新
 	s.sseService.BroadcastTaskDetailUpdate(s.taskID)
 
-	// 6. 创建同步引擎
+	// 7. 创建同步引擎
 	engine := NewSyncEngine()
 
-	// 7. 初始化阶段
+	// 8. 初始化阶段
 	s.logService.Info(s.taskID, "步骤 1/2: 初始化阶段")
 	if err := engine.InitializeWorker(s.ctx, s.taskID, sortedUnitNames); err != nil {
 		s.logService.Error(s.taskID, fmt.Sprintf("初始化阶段失败: %v", err))
@@ -278,7 +295,7 @@ func (s *IncrementalSync) executeFullSync() error {
 	default:
 	}
 
-	// 8. 数据同步阶段
+	// 9. 数据同步阶段
 	s.logService.Info(s.taskID, "步骤 2/2: 数据同步阶段")
 
 	database.DB.Model(&models.SyncTask{}).
@@ -350,9 +367,6 @@ func (s *IncrementalSync) executeFullSync() error {
 	}
 
 	syncWg.Wait()
-
-	// 9. 清空内存进度
-	progressManager.ClearTask(s.taskID)
 
 	s.logService.Info(s.taskID, "========== 全量同步阶段完成 ==========")
 	return nil
