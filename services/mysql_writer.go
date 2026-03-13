@@ -229,6 +229,11 @@ func (w *MySQLWriter) DropTable() error {
 
 // CreateTableLike 根据源表结构创建表
 func (w *MySQLWriter) CreateTableLike(sourceDB *sql.DB, sourceTable string) error {
+	return w.CreateTableLikeWithFields(sourceDB, sourceTable, nil)
+}
+
+// CreateTableLikeWithFields 根据源表结构创建表（支持字段过滤）
+func (w *MySQLWriter) CreateTableLikeWithFields(sourceDB *sql.DB, sourceTable string, selectedFields []string) error {
 	// 获取源表的CREATE TABLE语句
 	var tableName, createSQL string
 	query := fmt.Sprintf("SHOW CREATE TABLE `%s`", sourceTable)
@@ -242,12 +247,19 @@ func (w *MySQLWriter) CreateTableLike(sourceDB *sql.DB, sourceTable string) erro
 		return fmt.Errorf("获取源表结构失败: %w", err)
 	}
 
-	// 替换表名（使用更精确的替换方式）
-	// 原始格式: CREATE TABLE `source_table` (...)
-	// 目标格式: CREATE TABLE `target_table` (...)
-	oldTableDef := fmt.Sprintf("CREATE TABLE `%s`", sourceTable)
-	newTableDef := fmt.Sprintf("CREATE TABLE `%s`", w.tableName)
-	createSQL = strings.Replace(createSQL, oldTableDef, newTableDef, 1)
+	// 如果指定了字段列表，过滤字段并重建CREATE TABLE语句
+	if len(selectedFields) > 0 {
+		modifier := NewTableStructureModifier()
+		createSQL, err = modifier.FilterFieldsAndRebuild(createSQL, selectedFields, w.tableName)
+		if err != nil {
+			return fmt.Errorf("过滤字段失败: %w", err)
+		}
+	} else {
+		// 没有指定字段，只替换表名
+		oldTableDef := fmt.Sprintf("CREATE TABLE `%s`", sourceTable)
+		newTableDef := fmt.Sprintf("CREATE TABLE `%s`", w.tableName)
+		createSQL = strings.Replace(createSQL, oldTableDef, newTableDef, 1)
+	}
 
 	// 执行创建表
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)

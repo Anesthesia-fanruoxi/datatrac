@@ -34,10 +34,12 @@ func (s *TaskControlService) startFullSyncTask(taskID string) error {
 		return fmt.Errorf("获取任务配置失败: %w", err)
 	}
 
-	threadCount := config.SyncConfig.ThreadCount
-	if threadCount <= 0 {
-		threadCount = 1 // 默认1个线程
-	}
+	// 计算自适应线程数
+	calculator := NewAdaptiveConfigCalculator()
+	adaptiveConfig := calculator.GetDefaultConfig()
+	threadCount := adaptiveConfig.ThreadCount
+
+	logService.Info(taskID, fmt.Sprintf("系统自适应配置: 线程数=%d", threadCount))
 
 	// 生成任务单元列表（从配置中）
 	var unitNames []string

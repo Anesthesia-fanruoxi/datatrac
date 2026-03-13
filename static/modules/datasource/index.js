@@ -5,8 +5,6 @@
     window.DataSourceModule = {
         // 初始化模块
         init: function() {
-            console.log('数据源模块初始化');
-            
             // 加载数据源列表
             DataSourceCore.loadList();
             
@@ -34,7 +32,6 @@
         
         // 清理模块
         destroy: function() {
-            console.log('数据源模块清理');
             if (window.DataSourceSSE) {
                 window.DataSourceSSE.close();
             }

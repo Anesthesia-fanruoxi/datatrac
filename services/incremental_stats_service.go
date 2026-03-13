@@ -105,7 +105,7 @@ func (s *IncrementalStatsService) InitTaskStats(taskID string) error {
 	}
 
 	key := s.getTaskStatsKey(taskID)
-	if err := database.RedisClient.Set(s.ctx, key, data, 24*time.Hour).Err(); err != nil {
+	if err := database.RedisClient.Set(s.ctx, key, data, 0).Err(); err != nil {
 		return fmt.Errorf("保存到 Redis 失败: %v", err)
 	}
 
@@ -143,8 +143,8 @@ func (s *IncrementalStatsService) InitTableStats(taskID, dbName, tableName strin
 		return fmt.Errorf("序列化表统计失败: %v", err)
 	}
 
-	// 保存到 Redis，24小时过期
-	if err := database.RedisClient.Set(s.ctx, key, data, 24*time.Hour).Err(); err != nil {
+	// 保存到 Redis，永久有效
+	if err := database.RedisClient.Set(s.ctx, key, data, 0).Err(); err != nil {
 		return fmt.Errorf("保存表统计到 Redis 失败: %v", err)
 	}
 
@@ -152,7 +152,8 @@ func (s *IncrementalStatsService) InitTableStats(taskID, dbName, tableName strin
 	listKey := s.getTableListKey(taskID)
 	tableKey := fmt.Sprintf("%s.%s", dbName, tableName)
 	database.RedisClient.SAdd(s.ctx, listKey, tableKey)
-	database.RedisClient.Expire(s.ctx, listKey, 24*time.Hour)
+	// 表列表永久有效
+	database.RedisClient.Persist(s.ctx, listKey)
 
 	return nil
 }
@@ -208,8 +209,8 @@ func (s *IncrementalStatsService) UpdateTableStats(taskID, dbName, tableName, ev
 		return err
 	}
 
-	// 保存到 Redis，24小时过期
-	if err := database.RedisClient.Set(s.ctx, key, newData, 24*time.Hour).Err(); err != nil {
+	// 保存到 Redis，永久有效
+	if err := database.RedisClient.Set(s.ctx, key, newData, 0).Err(); err != nil {
 		return err
 	}
 
@@ -217,7 +218,8 @@ func (s *IncrementalStatsService) UpdateTableStats(taskID, dbName, tableName, ev
 	listKey := s.getTableListKey(taskID)
 	tableKey := fmt.Sprintf("%s.%s", dbName, tableName)
 	database.RedisClient.SAdd(s.ctx, listKey, tableKey)
-	database.RedisClient.Expire(s.ctx, listKey, 24*time.Hour)
+	// 表列表永久有效
+	database.RedisClient.Persist(s.ctx, listKey)
 
 	return nil
 }

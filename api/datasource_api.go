@@ -4,6 +4,7 @@ import (
 	"datatrace/common"
 	"datatrace/services"
 	"datatrace/utils"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 )
@@ -236,4 +237,46 @@ func (api *DataSourceAPI) GetDatabasesWithTables(c *gin.Context) {
 	}
 
 	common.Success(c, result)
+}
+
+// GetTableColumns 获取指定表的字段列表（仅MySQL）
+func (api *DataSourceAPI) GetTableColumns(c *gin.Context) {
+	id := c.Param("id")
+	database := c.Param("database")
+	table := c.Param("table")
+
+	if database == "" || table == "" {
+		common.BadRequest(c, "database和table参数不能为空")
+		return
+	}
+
+	// 获取数据源
+	ds, err := api.service.GetByID(id)
+	if err != nil {
+		common.NotFound(c, "数据源不存在")
+		return
+	}
+
+	if ds.Type != "mysql" {
+		common.BadRequest(c, "只有MySQL数据源支持此操作")
+		return
+	}
+
+	// 解密密码
+	crypto := utils.NewCryptoService()
+	password, err := crypto.Decrypt(ds.Password)
+	if err != nil {
+		common.Error(c, 500, "密码解密失败")
+		return
+	}
+
+	// 直接查询字段列表
+	mysqlService := services.NewMySQLMetadataService()
+	columns, err := mysqlService.GetTableColumns(ds.Host, ds.Port, ds.Username, password, database, table)
+	if err != nil {
+		common.Error(c, 500, fmt.Sprintf("获取字段列表失败: %v", err))
+		return
+	}
+
+	common.Success(c, columns)
 }

@@ -54,7 +54,8 @@ func SetupRouter() *gin.Engine {
 			datasources.POST("/:id/test", dsAPI.TestConnectionByID)
 			datasources.GET("/:id/databases", dsAPI.GetDatabases)
 			datasources.GET("/:id/tables", dsAPI.GetTables)
-			datasources.GET("/:id/database-tables", dsAPI.GetDatabasesWithTables) // 新增：获取完整树形结构
+			datasources.GET("/:id/database-tables", dsAPI.GetDatabasesWithTables)          // 新增：获取完整树形结构
+			datasources.GET("/:id/tables/:database/:table/columns", dsAPI.GetTableColumns) // 新增：获取表字段列表
 			datasources.PUT("/:id", dsAPI.Update)
 			datasources.DELETE("/:id", dsAPI.Delete)
 

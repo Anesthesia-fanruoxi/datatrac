@@ -9,14 +9,12 @@
         start: function() {
             this.close();
             
-            console.log('启动数据源 SSE 测试');
             this.eventSource = new EventSource('/api/v1/datasources/test/stream');
             
             // 监听测试事件
             this.eventSource.addEventListener('test', (e) => {
                 try {
                     const result = JSON.parse(e.data);
-                    console.log('收到测试结果:', result);
                     this.updateStatus(result);
                 } catch (error) {
                     console.error('解析测试结果失败:', error);
@@ -27,17 +25,11 @@
             this.eventSource.onerror = (e) => {
                 console.error('数据源 SSE 连接错误:', e);
             };
-            
-            // 监听连接打开
-            this.eventSource.onopen = () => {
-                console.log('数据源 SSE 连接已建立');
-            };
         },
         
         // 关闭 SSE 连接
         close: function() {
             if (this.eventSource) {
-                console.log('关闭数据源 SSE 连接');
                 this.eventSource.close();
                 this.eventSource = null;
             }

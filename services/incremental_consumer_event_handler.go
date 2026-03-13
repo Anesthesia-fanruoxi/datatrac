@@ -27,6 +27,9 @@ func (c *IncrementalConsumer) applyInsert(event *BinlogEvent) error {
 		return nil
 	}
 
+	// 过滤字段
+	c.filterEventFields(event)
+
 	// 验证数据是否为空
 	if len(event.Data) == 0 {
 		c.logService.Warning(c.taskID, fmt.Sprintf(
@@ -78,6 +81,9 @@ func (c *IncrementalConsumer) applyUpdate(event *BinlogEvent) error {
 		// 不在同步范围内，跳过
 		return nil
 	}
+
+	// 过滤字段
+	c.filterEventFields(event)
 
 	// 验证数据是否为空
 	if len(event.Data) == 0 {
@@ -162,6 +168,9 @@ func (c *IncrementalConsumer) applyDelete(event *BinlogEvent) error {
 		// 不在同步范围内，跳过
 		return nil
 	}
+
+	// 过滤字段
+	c.filterEventFields(event)
 
 	// 验证数据是否为空
 	if len(event.Data) == 0 {

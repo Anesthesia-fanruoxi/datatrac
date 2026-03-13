@@ -92,6 +92,14 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // 添加ESC键关闭功能
+            this.escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.close();
+                }
+            };
+            document.addEventListener('keydown', this.escHandler);
         },
         
         // 加载任务信息
@@ -132,7 +140,6 @@
                                 this.taskData.sync_config = config.sync_config;
                             }
                             
-                            console.log('已加载现有配置:', this.taskData);
                         } catch (e) {
                             console.warn('配置解析失败，将使用空配置:', e);
                         }
@@ -266,6 +273,11 @@
             const modal = document.getElementById('wizardModal');
             if (modal) {
                 modal.remove();
+            }
+            // 移除ESC键监听
+            if (this.escHandler) {
+                document.removeEventListener('keydown', this.escHandler);
+                this.escHandler = null;
             }
         }
     };

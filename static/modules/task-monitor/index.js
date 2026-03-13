@@ -5,8 +5,6 @@
     window.TaskMonitorModule = {
         // 初始化模块
         init: function(taskId) {
-            console.log('任务监控模块初始化');
-            
             // 加载任务列表
             if (window.TaskMonitorList) {
                 window.TaskMonitorList.load();
@@ -32,7 +30,6 @@
         
         // 清理模块
         destroy: function() {
-            console.log('任务监控模块清理');
             if (window.TaskMonitorSSE) {
                 window.TaskMonitorSSE.closeAll();
             }

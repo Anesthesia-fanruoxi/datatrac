@@ -164,8 +164,7 @@
                                     <tr><td>目标数据源</td><td>${task.target_conn?.name || '-'}</td></tr>
                                     <tr><td>同步表数量</td><td>${totalTables} 张</td></tr>
                                     <tr><td>同步模式</td><td>${config.sync_config?.sync_mode === 'full' ? '全量同步' : '增量同步'}</td></tr>
-                                    <tr><td>批次大小</td><td>${config.sync_config?.batch_size || '-'} 条</td></tr>
-                                    <tr><td>并发线程数</td><td>${config.sync_config?.thread_count || '-'} 个</td></tr>
+                                    <tr><td colspan="2" class="text-muted"><small><i class="bi bi-cpu me-1"></i>使用智能自适应配置</small></td></tr>
                                 </table>
                             </div>
                             <div class="col-md-6">
@@ -189,6 +188,14 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // 添加ESC键关闭功能
+            this.viewModalEscHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeViewModal();
+                }
+            };
+            document.addEventListener('keydown', this.viewModalEscHandler);
         },
         
         // 渲染表列表
@@ -213,6 +220,11 @@
             const modal = document.getElementById('viewTaskModal');
             if (modal) {
                 modal.remove();
+            }
+            // 移除ESC键监听
+            if (this.viewModalEscHandler) {
+                document.removeEventListener('keydown', this.viewModalEscHandler);
+                this.viewModalEscHandler = null;
             }
         },
         

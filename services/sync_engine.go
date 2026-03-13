@@ -99,22 +99,29 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unitName stri
 		return e.failUnit(taskID, unitName, fmt.Sprintf("解密目标数据库密码失败: %v", err))
 	}
 
-	// 6. 创建Reader
-	reader, err := NewMySQLReader(
+	// 6. 获取字段配置
+	selectedFields := e.getSelectedFields(config, sourceDB, sourceTable)
+
+	// 7. 计算自适应批次大小
+	batchSize := e.calculateAdaptiveBatchSize(task.SourceConn, sourceDB, sourceTable, sourcePassword)
+
+	// 8. 创建Reader（支持字段选择和自适应批次）
+	reader, err := NewMySQLReaderWithFields(
 		task.SourceConn.Host,
 		task.SourceConn.Port,
 		task.SourceConn.Username,
 		sourcePassword,
 		sourceDB,
 		sourceTable,
-		config.SyncConfig.BatchSize,
+		batchSize,
+		selectedFields,
 	)
 	if err != nil {
 		return e.failUnit(taskID, unitName, fmt.Sprintf("创建Reader失败: %v", err))
 	}
 	defer reader.Close()
 
-	// 7. 创建Writer
+	// 9. 创建Writer
 	writer, err := NewMySQLWriter(
 		task.TargetConn.Host,
 		task.TargetConn.Port,

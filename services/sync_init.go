@@ -224,6 +224,9 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitNam
 	}
 	defer writer.Close()
 
+	// 3.5 获取字段配置
+	selectedFields := e.getSelectedFields(config, sourceDB, sourceTable)
+
 	// 4. 处理表存在策略
 	strategy := config.SyncConfig.TableExistsStrategy
 	switch strategy {
@@ -233,8 +236,8 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitNam
 			return fmt.Errorf("删除表失败: %v", err)
 		}
 
-		// 创建表结构（包含外键）
-		if err := writer.CreateTableLike(reader.GetDB(), sourceTable); err != nil {
+		// 创建表结构（支持字段过滤）
+		if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
 			return fmt.Errorf("创建表结构失败: %v", err)
 		}
 
@@ -246,7 +249,7 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitNam
 
 	case "append":
 		// 检查表是否存在，不存在则创建
-		err := writer.CreateTableLike(reader.GetDB(), sourceTable)
+		err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields)
 		if err != nil {
 			// 表可能已存在，忽略错误
 		}
@@ -333,8 +336,11 @@ func (e *SyncEngine) createTable(ctx context.Context, taskID string, unitName st
 	}
 	defer writer.Close()
 
-	// 创建表结构（包含外键）
-	if err := writer.CreateTableLike(reader.GetDB(), sourceTable); err != nil {
+	// 获取字段配置
+	selectedFields := e.getSelectedFields(config, sourceDB, sourceTable)
+
+	// 创建表结构（支持字段过滤）
+	if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
 		return fmt.Errorf("创建表结构失败: %v", err)
 	}
 

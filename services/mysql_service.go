@@ -185,3 +185,48 @@ func (s *MySQLMetadataService) GetDatabasesWithTables(host string, port int, use
 
 	return result, nil
 }
+
+// GetTableColumns 获取指定表的字段列表（仅MySQL）
+func (s *MySQLMetadataService) GetTableColumns(host string, port int, username, password, database, table string) ([]map[string]interface{}, error) {
+	// 构建连接字符串
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		username, password, host, port, database)
+
+	// 连接数据库
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("连接失败: %w", err)
+	}
+	defer db.Close()
+
+	// 查询字段列表（包括是否主键）
+	query := `
+		SELECT 
+			COLUMN_NAME,
+			COLUMN_KEY
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+		ORDER BY ORDINAL_POSITION
+	`
+
+	rows, err := db.Query(query, database, table)
+	if err != nil {
+		return nil, fmt.Errorf("查询字段列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	var columns []map[string]interface{}
+	for rows.Next() {
+		var columnName, columnKey string
+		if err := rows.Scan(&columnName, &columnKey); err != nil {
+			return nil, err
+		}
+
+		columns = append(columns, map[string]interface{}{
+			"name":       columnName,
+			"is_primary": columnKey == "PRI",
+		})
+	}
+
+	return columns, nil
+}

@@ -5,8 +5,6 @@
     window.TaskConfigModule = {
         // 初始化模块
         init: function() {
-            console.log('任务配置模块初始化');
-            
             // 加载任务列表
             TaskConfigCore.loadList();
             
@@ -25,7 +23,6 @@
         
         // 清理模块
         destroy: function() {
-            console.log('任务配置模块清理');
         }
     };
     

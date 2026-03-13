@@ -170,6 +170,10 @@
                                         ${table.is_modified ? `<span style="color: #28a745; font-weight: 500;">${table.target_table}</span> <span class="text-muted small">(原: ${table.source_table})</span>` : table.source_table}
                                     </span>
                                     <i class="bi bi-pencil ms-2 edit-icon" onclick="TaskWizardStep2.editTableName('${dbKey}', '${table.source_table}')" title="编辑表名"></i>
+                                    <button class="btn btn-sm btn-outline-primary ms-2" style="padding: 2px 8px; font-size: 12px;" 
+                                        onclick="TaskWizardStep2.selectFields('${dbKey}', '${table.source_table}')" title="选择字段">
+                                        <i class="bi bi-list-check"></i> 字段${table.selected_fields && table.selected_fields.length > 0 ? ` (${table.selected_fields.length})` : ''}
+                                    </button>
                                 </div>
                             `).join('')}
                         </div>
@@ -475,6 +479,14 @@
             this.batchEditType = type;
             this.batchEditSelected = selected;
             
+            // 添加ESC键关闭功能
+            this.batchEditEscHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeBatchEditModal();
+                }
+            };
+            document.addEventListener('keydown', this.batchEditEscHandler);
+            
             // 绑定单选按钮切换事件
             document.querySelectorAll('input[name="batchEditType"]').forEach(radio => {
                 radio.addEventListener('change', function() {
@@ -670,6 +682,11 @@
             if (modal) {
                 modal.remove();
             }
+            // 移除ESC键监听
+            if (this.batchEditEscHandler) {
+                document.removeEventListener('keydown', this.batchEditEscHandler);
+                this.batchEditEscHandler = null;
+            }
         },
         
         // 刷新右侧面板
@@ -749,6 +766,178 @@
             taskData.selected_tables = TaskWizardStep2Mapping.getSelectedTables();
             
             return true;
+        },
+        
+        // 选择字段
+        selectFields: async function(dbKey, tableName) {
+            const mapping = TaskWizardStep2Mapping.mappings[dbKey];
+            if (!mapping) return;
+            
+            const table = mapping.tables.find(t => t.source_table === tableName);
+            if (!table) return;
+            
+            // 从向导获取任务数据
+            const taskData = window.TaskWizard ? window.TaskWizard.taskData : {};
+            const sourceId = taskData.source_id;
+            
+            if (!sourceId) {
+                Toast.error('请先选择数据源');
+                console.error('未找到source_id，taskData:', taskData);
+                return;
+            }
+            
+            try {
+                // 获取表的字段列表
+                const url = `/api/v1/datasources/${sourceId}/tables/${encodeURIComponent(mapping.source_database)}/${encodeURIComponent(tableName)}/columns`;
+                console.log('获取字段列表:', url);
+                console.log('数据源ID:', sourceId);
+                console.log('数据库:', mapping.source_database);
+                console.log('表名:', tableName);
+                
+                const result = await HttpUtils.get(url);
+                
+                if (result.code !== 200) {
+                    Toast.error('获取字段列表失败: ' + result.message);
+                    console.error('API错误:', result);
+                    return;
+                }
+                
+                const columns = result.data || [];
+                if (columns.length === 0) {
+                    Toast.warning('该表没有字段');
+                    return;
+                }
+                
+                console.log('获取到字段:', columns);
+                
+                // 显示字段选择对话框
+                this.showFieldSelectionModal(dbKey, tableName, columns, table.selected_fields || []);
+                
+            } catch (error) {
+                console.error('获取字段列表异常:', error);
+                Toast.error('获取字段列表失败: ' + error.message);
+            }
+        },
+        
+        // 显示字段选择模态框
+        showFieldSelectionModal: function(dbKey, tableName, columns, selectedFields) {
+            const modalHtml = `
+            <div id="fieldSelectionModal" style="display:block; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2000;">
+                <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:0; border-radius:15px; width:700px; max-height:80vh; box-shadow: 0 20px 60px rgba(0,0,0,0.3); display:flex; flex-direction:column;">
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px 15px 0 0;">
+                        <h5 style="color: white; margin: 0;"><i class="bi bi-list-check me-2"></i>选择字段</h5>
+                        <div style="color: rgba(255,255,255,0.9); font-size: 14px; margin-top: 5px;">
+                            表: ${tableName} (共 ${columns.length} 个字段)
+                        </div>
+                    </div>
+                    <div style="padding: 20px; overflow-y: auto; flex: 1;">
+                        <div class="mb-3">
+                            <button class="btn btn-sm btn-outline-primary me-2" onclick="TaskWizardStep2.selectAllFields()">全选</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="TaskWizardStep2.deselectAllFields()">取消全选</button>
+                            <span class="ms-3 text-muted">已选择: <span id="selectedFieldCount">0</span> / ${columns.length}</span>
+                        </div>
+                        <div id="fieldList" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px;">
+                            ${columns.map(col => {
+                                const colName = typeof col === 'string' ? col : col.name;
+                                const isPrimary = typeof col === 'object' && col.is_primary;
+                                const isSelected = selectedFields.includes(colName) || isPrimary;
+                                return `
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input field-checkbox" type="checkbox" value="${colName}" id="field-${colName}" 
+                                        ${isSelected ? 'checked' : ''}
+                                        ${isPrimary ? 'disabled' : ''}>
+                                    <label class="form-check-label" for="field-${colName}">
+                                        ${isPrimary ? '<i class="bi bi-key-fill me-2 text-warning" title="主键"></i>' : '<i class="bi bi-diagram-3 me-2 text-primary"></i>'}
+                                        ${colName}
+                                        ${isPrimary ? '<span class="badge bg-warning text-dark ms-2">主键</span>' : ''}
+                                    </label>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    </div>
+                    <div style="padding: 20px; border-top: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center;">
+                        <div class="text-muted small">
+                            <i class="bi bi-info-circle me-1"></i>主键字段必须选择，不选择其他字段表示同步所有字段
+                        </div>
+                        <div>
+                            <button type="button" class="btn btn-secondary me-2" onclick="TaskWizardStep2.closeFieldSelectionModal()">取消</button>
+                            <button type="button" class="btn btn-primary" onclick="TaskWizardStep2.applyFieldSelection('${dbKey}', '${tableName}')">
+                                <i class="bi bi-check-circle"></i> 确定
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // 更新选中数量
+            this.updateSelectedFieldCount();
+            
+            // 绑定复选框变化事件
+            document.querySelectorAll('.field-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', () => {
+                    this.updateSelectedFieldCount();
+                });
+            });
+            
+            // 添加ESC键关闭功能
+            this.fieldSelectionEscHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeFieldSelectionModal();
+                }
+            };
+            document.addEventListener('keydown', this.fieldSelectionEscHandler);
+        },
+        
+        // 更新选中字段数量
+        updateSelectedFieldCount: function() {
+            const count = document.querySelectorAll('.field-checkbox:checked').length;
+            const countElement = document.getElementById('selectedFieldCount');
+            if (countElement) {
+                countElement.textContent = count;
+            }
+        },
+        
+        // 全选字段
+        selectAllFields: function() {
+            document.querySelectorAll('.field-checkbox:not(:disabled)').forEach(cb => cb.checked = true);
+            this.updateSelectedFieldCount();
+        },
+        
+        // 取消全选字段
+        deselectAllFields: function() {
+            document.querySelectorAll('.field-checkbox:not(:disabled)').forEach(cb => cb.checked = false);
+            this.updateSelectedFieldCount();
+        },
+        
+        // 应用字段选择
+        applyFieldSelection: function(dbKey, tableName) {
+            const selectedFields = [];
+            document.querySelectorAll('.field-checkbox:checked').forEach(checkbox => {
+                selectedFields.push(checkbox.value);
+            });
+            
+            // 更新映射中的字段配置
+            TaskWizardStep2Mapping.updateTableFields(dbKey, tableName, selectedFields);
+            
+            this.closeFieldSelectionModal();
+            this.refreshRight();
+            Toast.success('字段选择已保存');
+        },
+        
+        // 关闭字段选择模态框
+        closeFieldSelectionModal: function() {
+            const modal = document.getElementById('fieldSelectionModal');
+            if (modal) {
+                modal.remove();
+            }
+            // 移除ESC键监听
+            if (this.fieldSelectionEscHandler) {
+                document.removeEventListener('keydown', this.fieldSelectionEscHandler);
+                this.fieldSelectionEscHandler = null;
+            }
         }
     };
 })();

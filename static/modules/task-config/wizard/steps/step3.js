@@ -7,8 +7,6 @@
         render: function(container, taskData) {
             const config = taskData.sync_config || {
                 sync_mode: 'full',
-                batch_size: 1000,
-                thread_count: 4,
                 error_strategy: 'skip',
                 table_exists_strategy: 'truncate'
             };
@@ -108,23 +106,32 @@
                             </div>
                             
                             <div class="col-md-6">
-                                <div class="mb-4">
-                                    <label class="form-label fw-bold">批次大小 <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="batchSize" 
-                                        value="${config.batch_size}" min="100" max="10000" required>
-                                    <div class="form-text">每批次同步的记录数，建议 1000-5000</div>
-                                </div>
-                                
-                                <div class="mb-4">
-                                    <label class="form-label fw-bold">并发线程数 <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="threadCount" 
-                                        value="${config.thread_count}" min="1" max="16" required>
-                                    <div class="form-text">并发同步的线程数，建议 2-8</div>
-                                </div>
-                                
                                 <div class="alert alert-info">
-                                    <i class="bi bi-info-circle me-2"></i>
-                                    <strong>提示：</strong>配置参数会影响同步性能和数据安全，请根据实际情况调整
+                                    <i class="bi bi-cpu me-2"></i>
+                                    <strong>智能自适应配置</strong>
+                                    <hr>
+                                    <p class="mb-2">系统将根据以下因素自动优化同步参数：</p>
+                                    <ul class="mb-0">
+                                        <li>CPU核心数和可用内存</li>
+                                        <li>表的大小和记录数</li>
+                                        <li>字段数量和平均行长度</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="alert alert-success">
+                                    <i class="bi bi-lightning-charge me-2"></i>
+                                    <strong>性能优化策略</strong>
+                                    <hr>
+                                    <p class="mb-2"><strong>全量同步：</strong></p>
+                                    <ul class="mb-2">
+                                        <li>多线程并行处理（自动分配）</li>
+                                        <li>批次大小根据表大小自适应</li>
+                                    </ul>
+                                    <p class="mb-2"><strong>增量同步：</strong></p>
+                                    <ul class="mb-0">
+                                        <li>Binlog监听单线程（保证顺序）</li>
+                                        <li>事件消费自动优化</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
@@ -148,8 +155,6 @@
                 
                 taskData.sync_config = {
                     sync_mode: syncModeRadio ? syncModeRadio.value : 'full',
-                    batch_size: parseInt(document.getElementById('batchSize').value),
-                    thread_count: parseInt(document.getElementById('threadCount').value),
                     error_strategy: errorStrategyRadio ? errorStrategyRadio.value : 'skip',
                     table_exists_strategy: tableStrategyRadio ? tableStrategyRadio.value : 'truncate'
                 };
@@ -172,8 +177,6 @@
             // 保存配置
             taskData.sync_config = {
                 sync_mode: syncModeRadio ? syncModeRadio.value : 'full',
-                batch_size: parseInt(document.getElementById('batchSize').value),
-                thread_count: parseInt(document.getElementById('threadCount').value),
                 error_strategy: errorStrategyRadio ? errorStrategyRadio.value : 'skip',
                 table_exists_strategy: tableStrategyRadio ? tableStrategyRadio.value : 'truncate'
             };

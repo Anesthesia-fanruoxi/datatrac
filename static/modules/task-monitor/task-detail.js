@@ -23,8 +23,6 @@
         
         // 启动 SSE 连接
         startSSE: function(taskId) {
-            console.log('启动 SSE 连接，任务ID:', taskId);
-            
             // 关闭旧的 SSE 连接
             if (window.TaskMonitorSSE) {
                 window.TaskMonitorSSE.closeAll();
@@ -32,19 +30,16 @@
             
             // 启动任务详情 SSE（始终连接）
             if (window.TaskDetailSSE) {
-                console.log('启动任务详情 SSE');
                 window.TaskDetailSSE.start(taskId);
             }
             
             // 启动进度 SSE（始终连接）
             if (window.TaskMonitorProgressSSE) {
-                console.log('启动进度 SSE');
                 window.TaskMonitorProgressSSE.start(taskId);
             }
             
             // 启动日志 SSE（始终连接，默认all分类）
             if (window.TaskMonitorLogsSSE) {
-                console.log('启动日志 SSE');
                 window.TaskMonitorLogsSSE.start(taskId, 'all');
             }
         },
@@ -119,11 +114,11 @@
             
             // 从 currentTask 获取任务状态信息
             const taskStatus = this.currentTask?.status || 'configured';
-            const isRunning = this.currentTask?.is_running || false;
+            // 判断是否已完成
+            const isCompleted = taskStatus === 'completed' || 
+                               (progress.completed_tables === progress.total_tables && progress.total_tables > 0);
             
-            console.log('更新进度UI - syncMode:', syncMode, 'currentStep:', currentStep, 'progress:', progress);
-            
-            // 如果是增量模式，显示数据库级别统计或表明细
+            // 渲染步骤进度条
             if (syncMode === 'incremental') {
                 if (progress.database_stats) {
                     // 显示数据库级别统计（第一级）

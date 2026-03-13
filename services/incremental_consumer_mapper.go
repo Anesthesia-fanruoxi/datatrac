@@ -61,3 +61,61 @@ func joinStrings(strs []string, sep string) string {
 
 	return result
 }
+
+// getSelectedFields 获取表的选中字段列表
+func (c *IncrementalConsumer) getSelectedFields(sourceDB, sourceTable string) []string {
+	if c.config == nil {
+		return nil
+	}
+
+	// 遍历配置，查找匹配的数据库和表
+	for _, dbSel := range c.config.SelectedDatabases {
+		if dbSel.SourceDatabase == sourceDB {
+			for _, tbl := range dbSel.Tables {
+				if tbl.SourceTable == sourceTable {
+					return tbl.SelectedFields
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// filterEventFields 根据配置过滤事件中的字段
+func (c *IncrementalConsumer) filterEventFields(event *BinlogEvent) {
+	selectedFields := c.getSelectedFields(event.Database, event.Table)
+
+	// 如果没有配置字段或字段列表为空，不过滤
+	if len(selectedFields) == 0 {
+		return
+	}
+
+	// 创建字段集合用于快速查找
+	fieldSet := make(map[string]bool)
+	for _, field := range selectedFields {
+		fieldSet[field] = true
+	}
+
+	// 过滤 Data 字段
+	if event.Data != nil {
+		filteredData := make(map[string]interface{})
+		for col, val := range event.Data {
+			if fieldSet[col] {
+				filteredData[col] = val
+			}
+		}
+		event.Data = filteredData
+	}
+
+	// 过滤 OldData 字段
+	if event.OldData != nil {
+		filteredOldData := make(map[string]interface{})
+		for col, val := range event.OldData {
+			if fieldSet[col] {
+				filteredOldData[col] = val
+			}
+		}
+		event.OldData = filteredOldData
+	}
+}

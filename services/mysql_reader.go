@@ -10,15 +10,21 @@ import (
 
 // MySQLReader MySQL数据读取器
 type MySQLReader struct {
-	db         *sql.DB
-	tableName  string
-	batchSize  int
-	offset     int64
-	totalCount int64
+	db             *sql.DB
+	tableName      string
+	batchSize      int
+	offset         int64
+	totalCount     int64
+	selectedFields []string // 选中的字段列表，为空表示查询所有字段
 }
 
 // NewMySQLReader 创建MySQL读取器
 func NewMySQLReader(host string, port int, username, password, database, tableName string, batchSize int) (*MySQLReader, error) {
+	return NewMySQLReaderWithFields(host, port, username, password, database, tableName, batchSize, nil)
+}
+
+// NewMySQLReaderWithFields 创建MySQL读取器（支持字段选择）
+func NewMySQLReaderWithFields(host string, port int, username, password, database, tableName string, batchSize int, selectedFields []string) (*MySQLReader, error) {
 	// 校验表名
 	if err := ValidateTableName(tableName); err != nil {
 		return nil, fmt.Errorf("表名校验失败: %w", err)
@@ -47,10 +53,11 @@ func NewMySQLReader(host string, port int, username, password, database, tableNa
 	}
 
 	reader := &MySQLReader{
-		db:        db,
-		tableName: tableName,
-		batchSize: batchSize,
-		offset:    0,
+		db:             db,
+		tableName:      tableName,
+		batchSize:      batchSize,
+		offset:         0,
+		selectedFields: selectedFields,
 	}
 
 	// 查询总记录数
@@ -79,9 +86,20 @@ func (r *MySQLReader) GetTotalCount() int64 {
 
 // ReadBatch 读取一批数据
 func (r *MySQLReader) ReadBatch() ([]map[string]interface{}, error) {
+	// 构建字段列表
+	fieldList := "*"
+	if len(r.selectedFields) > 0 {
+		// 使用反引号包裹字段名，防止SQL注入和关键字冲突
+		quotedFields := make([]string, len(r.selectedFields))
+		for i, field := range r.selectedFields {
+			quotedFields[i] = fmt.Sprintf("`%s`", field)
+		}
+		fieldList = joinStrings(quotedFields, ", ")
+	}
+
 	// 构建查询语句
-	query := fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d",
-		r.tableName, r.batchSize, r.offset)
+	query := fmt.Sprintf("SELECT %s FROM `%s` LIMIT %d OFFSET %d",
+		fieldList, r.tableName, r.batchSize, r.offset)
 
 	// 执行查询
 	rows, err := r.db.Query(query)

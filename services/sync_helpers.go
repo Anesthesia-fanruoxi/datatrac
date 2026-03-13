@@ -1,6 +1,8 @@
 package services
 
 import (
+	"database/sql"
+	"datatrace/models"
 	"fmt"
 	"strings"
 )
@@ -60,4 +62,54 @@ func safePercent(processed, total int64) float64 {
 // splitTableName 分割表名（格式：database.table）
 func splitTableName(unitName string) []string {
 	return strings.Split(unitName, ".")
+}
+
+// getSelectedFields 获取表的选中字段列表
+func (e *SyncEngine) getSelectedFields(config *TaskConfig, sourceDB, sourceTable string) []string {
+	if config == nil {
+		return nil
+	}
+
+	// 遍历配置，查找匹配的数据库和表
+	for _, dbSel := range config.SelectedDatabases {
+		if dbSel.SourceDatabase == sourceDB {
+			for _, tbl := range dbSel.Tables {
+				if tbl.SourceTable == sourceTable {
+					return tbl.SelectedFields
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// calculateAdaptiveBatchSize 计算自适应批次大小
+func (e *SyncEngine) calculateAdaptiveBatchSize(sourceConn *models.DataSource, database, table, password string) int {
+	calculator := NewAdaptiveConfigCalculator()
+
+	// 尝试连接数据库获取表统计信息
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		sourceConn.Username, password, sourceConn.Host, sourceConn.Port, database)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		// 连接失败，使用默认配置
+		e.logService.Warning("", fmt.Sprintf("无法连接数据库获取统计信息，使用默认批次大小: %v", err))
+		return calculator.GetDefaultConfig().BatchSize
+	}
+	defer db.Close()
+
+	// 获取表统计信息
+	stats, err := calculator.GetTableStats(db, database, table)
+	if err != nil {
+		// 获取统计信息失败，使用默认配置
+		e.logService.Warning("", fmt.Sprintf("无法获取表统计信息，使用默认批次大小: %v", err))
+		return calculator.GetDefaultConfig().BatchSize
+	}
+
+	// 计算批次大小
+	batchSize := calculator.CalculateForTable(stats)
+
+	return batchSize
 }

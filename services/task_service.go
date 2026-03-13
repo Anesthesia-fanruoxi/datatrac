@@ -49,18 +49,21 @@ type DatabaseSelection struct {
 
 // TableConfig 表配置
 type TableConfig struct {
-	SourceTable string `json:"source_table"`
-	TargetTable string `json:"target_table"`
-	IsModified  bool   `json:"is_modified"`
+	SourceTable    string   `json:"source_table"`
+	TargetTable    string   `json:"target_table"`
+	IsModified     bool     `json:"is_modified"`
+	SelectedFields []string `json:"selected_fields"` // 选中的字段列表，为空表示同步所有字段
 }
 
 // SyncConfigParams 同步配置参数
 type SyncConfigParams struct {
-	BatchSize           int    `json:"batch_size"`
-	ThreadCount         int    `json:"thread_count"`
-	SyncMode            string `json:"sync_mode"` // full/incremental
-	ErrorStrategy       string `json:"error_strategy"`
-	TableExistsStrategy string `json:"table_exists_strategy"`
+	SyncMode            string `json:"sync_mode"`             // full/incremental
+	ErrorStrategy       string `json:"error_strategy"`        // pause/skip
+	TableExistsStrategy string `json:"table_exists_strategy"` // skip/drop/truncate
+
+	// 已废弃字段（保留向后兼容，但不再使用）
+	BatchSize   int `json:"batch_size,omitempty"`   // 已废弃：现在使用自适应批次大小
+	ThreadCount int `json:"thread_count,omitempty"` // 已废弃：现在使用自适应线程数
 }
 
 // TaskConfig 任务配置（存储在config字段的JSON）
@@ -171,7 +174,11 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 	}
 
 	// 清除旧的运行时数据
-	s.clearRuntimeData(task.ID)
+	// 只有全量同步任务才清除运行时数据
+	// 增量同步任务需要保留运行时数据，因为增量同步是持续性的，修改配置后应继续同步
+	if task.SyncMode != "incremental" {
+		s.clearRuntimeData(task.ID)
+	}
 
 	// 重新加载配置到Redis
 	configCache := NewConfigCacheService()

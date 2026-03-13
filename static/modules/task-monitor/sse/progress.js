@@ -20,14 +20,12 @@
                 url += `?database=${encodeURIComponent(database)}`;
             }
             
-            console.log('启动进度 SSE 连接，任务ID:', taskId, 'database:', database, 'URL:', url);
             this.eventSource = new EventSource(url);
             
             // 监听进度事件
             this.eventSource.addEventListener('progress', (e) => {
                 try {
                     const progress = JSON.parse(e.data);
-                    console.log('收到进度更新:', progress);
                     if (window.TaskMonitorDetail) {
                         window.TaskMonitorDetail.updateProgressUI(progress);
                     }
@@ -41,23 +39,16 @@
                 console.error('进度 SSE 连接错误:', e);
                 // SSE 会自动重连
             };
-            
-            // 监听连接打开
-            this.eventSource.onopen = () => {
-                console.log('进度 SSE 连接已建立');
-            };
         },
         
         // 切换数据库（重新建立SSE连接）
         switchDatabase: function(taskId, database) {
-            console.log('切换数据库，taskId:', taskId, 'database:', database);
             this.start(taskId, database);
         },
         
         // 关闭 SSE 连接
         close: function() {
             if (this.eventSource) {
-                console.log('关闭进度 SSE 连接');
                 this.eventSource.close();
                 this.eventSource = null;
             }

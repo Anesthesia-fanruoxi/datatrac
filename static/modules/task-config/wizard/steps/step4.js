@@ -50,10 +50,9 @@
                                 <h6><i class="bi bi-gear me-2"></i>同步配置</h6>
                                 <table class="table table-sm">
                                     <tr><td>同步模式</td><td>${syncConfig.sync_mode === 'full' ? '全量同步' : '增量同步'}</td></tr>
-                                    <tr><td>批次大小</td><td>${syncConfig.batch_size} 条</td></tr>
-                                    <tr><td>并发线程</td><td>${syncConfig.thread_count} 个</td></tr>
                                     <tr><td>错误策略</td><td>${syncConfig.error_strategy === 'skip' ? '跳过错误' : '遇错暂停'}</td></tr>
                                     <tr><td>表存在策略</td><td>${this.getTableStrategyText(syncConfig.table_exists_strategy)}</td></tr>
+                                    <tr><td colspan="2" class="text-muted"><small><i class="bi bi-cpu me-1"></i>批次大小和线程数将根据系统资源自动优化</small></td></tr>
                                 </table>
                             </div>
                         </div>
@@ -234,6 +233,14 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // 添加ESC键关闭功能
+            this.infoModalEscHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeInfoModal();
+                }
+            };
+            document.addEventListener('keydown', this.infoModalEscHandler);
         },
         
         // 关闭信息模态框
@@ -241,6 +248,11 @@
             const modal = document.getElementById('infoModal');
             if (modal) {
                 modal.remove();
+            }
+            // 移除ESC键监听
+            if (this.infoModalEscHandler) {
+                document.removeEventListener('keydown', this.infoModalEscHandler);
+                this.infoModalEscHandler = null;
             }
         },
         

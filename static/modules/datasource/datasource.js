@@ -60,6 +60,14 @@
             document.getElementById('modalTitle').textContent = '新建数据源';
             document.getElementById('dsPassword').required = true;
             document.getElementById('dsPassword').placeholder = '请输入密码';
+            
+            // 添加ESC键关闭功能
+            this.modalEscHandler = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeModal();
+                }
+            };
+            document.addEventListener('keydown', this.modalEscHandler);
         },
         
         // 编辑数据源
@@ -83,6 +91,14 @@
                     document.getElementById('dsType').dispatchEvent(new Event('change'));
                     document.getElementById('modalTitle').textContent = '编辑数据源';
                     document.getElementById('datasourceModal').style.display = 'block';
+                    
+                    // 添加ESC键关闭功能
+                    this.modalEscHandler = (e) => {
+                        if (e.key === 'Escape') {
+                            this.closeModal();
+                        }
+                    };
+                    document.addEventListener('keydown', this.modalEscHandler);
                 } else {
                     Toast.error('加载失败: ' + result.message);
                 }
@@ -115,6 +131,11 @@
         // 关闭模态框
         closeModal: function() {
             document.getElementById('datasourceModal').style.display = 'none';
+            // 移除ESC键监听
+            if (this.modalEscHandler) {
+                document.removeEventListener('keydown', this.modalEscHandler);
+                this.modalEscHandler = null;
+            }
         },
         
         // 测试连接

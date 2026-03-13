@@ -23,7 +23,8 @@
                     tables: (db.tables || []).map(t => ({
                         source_table: t.source_table,
                         target_table: t.target_table || t.source_table,
-                        is_modified: t.is_modified || false
+                        is_modified: t.is_modified || false,
+                        selected_fields: t.selected_fields || []
                     }))
                 };
             });
@@ -49,7 +50,8 @@
                         this.mappings[dbName].tables.push({
                             source_table: tableName,
                             target_table: tableName,
-                            is_modified: false
+                            is_modified: false,
+                            selected_fields: []
                         });
                     }
                 });
@@ -176,10 +178,21 @@
                     tables: mapping.tables.map(t => ({
                         source_table: t.source_table,
                         target_table: t.target_table,
-                        is_modified: t.is_modified
+                        is_modified: t.is_modified,
+                        selected_fields: t.selected_fields || []
                     }))
                 };
             });
+        },
+        
+        // 更新表的字段配置
+        updateTableFields: function(dbName, tableName, selectedFields) {
+            if (this.mappings[dbName]) {
+                const table = this.mappings[dbName].tables.find(t => t.source_table === tableName);
+                if (table) {
+                    table.selected_fields = selectedFields || [];
+                }
+            }
         },
         
         // 获取已选择的表（用于左侧回显）
