@@ -53,3 +53,11 @@ func (pc *PageController) TaskMonitorWithID(c *gin.Context) {
 		"TaskID": taskID,
 	})
 }
+
+// Credential 凭据管理页面
+func (pc *PageController) Credential(c *gin.Context) {
+	c.HTML(http.StatusOK, "credential/index.html", gin.H{
+		"Title":  "凭据管理",
+		"Active": "credentials",
+	})
+}

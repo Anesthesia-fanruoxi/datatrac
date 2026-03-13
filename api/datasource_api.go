@@ -144,17 +144,37 @@ func (api *DataSourceAPI) GetDatabases(c *gin.Context) {
 		return
 	}
 
-	// 解密密码
+	var username, password string
 	crypto := utils.NewCryptoService()
-	password, err := crypto.Decrypt(ds.Password)
-	if err != nil {
-		common.Error(c, 500, "密码解密失败")
-		return
+
+	// 如果使用凭据，从凭据获取账号密码
+	if ds.CredentialID != nil && *ds.CredentialID != "" {
+		credService := services.NewCredentialService()
+		credential, err := credService.GetByID(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据不存在")
+			return
+		}
+
+		username = credential.Username
+		password, err = credService.GetDecryptedPassword(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据密码解密失败")
+			return
+		}
+	} else {
+		// 使用数据源自己的账号密码
+		username = ds.Username
+		password, err = crypto.Decrypt(ds.Password)
+		if err != nil {
+			common.Error(c, 500, "密码解密失败")
+			return
+		}
 	}
 
 	// 获取数据库列表
 	mysqlService := services.NewMySQLMetadataService()
-	databases, err := mysqlService.GetDatabases(ds.Host, ds.Port, ds.Username, password)
+	databases, err := mysqlService.GetDatabases(ds.Host, ds.Port, username, password)
 	if err != nil {
 		common.Error(c, 500, err.Error())
 		return
@@ -185,17 +205,37 @@ func (api *DataSourceAPI) GetTables(c *gin.Context) {
 		return
 	}
 
-	// 解密密码
+	var username, password string
 	crypto := utils.NewCryptoService()
-	password, err := crypto.Decrypt(ds.Password)
-	if err != nil {
-		common.Error(c, 500, "密码解密失败")
-		return
+
+	// 如果使用凭据，从凭据获取账号密码
+	if ds.CredentialID != nil && *ds.CredentialID != "" {
+		credService := services.NewCredentialService()
+		credential, err := credService.GetByID(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据不存在")
+			return
+		}
+
+		username = credential.Username
+		password, err = credService.GetDecryptedPassword(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据密码解密失败")
+			return
+		}
+	} else {
+		// 使用数据源自己的账号密码
+		username = ds.Username
+		password, err = crypto.Decrypt(ds.Password)
+		if err != nil {
+			common.Error(c, 500, "密码解密失败")
+			return
+		}
 	}
 
 	// 获取表列表
 	mysqlService := services.NewMySQLMetadataService()
-	tables, err := mysqlService.GetTables(ds.Host, ds.Port, ds.Username, password, database)
+	tables, err := mysqlService.GetTables(ds.Host, ds.Port, username, password, database)
 	if err != nil {
 		common.Error(c, 500, err.Error())
 		return
@@ -220,17 +260,37 @@ func (api *DataSourceAPI) GetDatabasesWithTables(c *gin.Context) {
 		return
 	}
 
-	// 解密密码
+	var username, password string
 	crypto := utils.NewCryptoService()
-	password, err := crypto.Decrypt(ds.Password)
-	if err != nil {
-		common.Error(c, 500, "密码解密失败")
-		return
+
+	// 如果使用凭据，从凭据获取账号密码
+	if ds.CredentialID != nil && *ds.CredentialID != "" {
+		credService := services.NewCredentialService()
+		credential, err := credService.GetByID(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据不存在")
+			return
+		}
+
+		username = credential.Username
+		password, err = credService.GetDecryptedPassword(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据密码解密失败")
+			return
+		}
+	} else {
+		// 使用数据源自己的账号密码
+		username = ds.Username
+		password, err = crypto.Decrypt(ds.Password)
+		if err != nil {
+			common.Error(c, 500, "密码解密失败")
+			return
+		}
 	}
 
 	// 获取数据库和表的树形结构
 	mysqlService := services.NewMySQLMetadataService()
-	result, err := mysqlService.GetDatabasesWithTables(ds.Host, ds.Port, ds.Username, password)
+	result, err := mysqlService.GetDatabasesWithTables(ds.Host, ds.Port, username, password)
 	if err != nil {
 		common.Error(c, 500, err.Error())
 		return
@@ -262,17 +322,37 @@ func (api *DataSourceAPI) GetTableColumns(c *gin.Context) {
 		return
 	}
 
-	// 解密密码
+	var username, password string
 	crypto := utils.NewCryptoService()
-	password, err := crypto.Decrypt(ds.Password)
-	if err != nil {
-		common.Error(c, 500, "密码解密失败")
-		return
+
+	// 如果使用凭据，从凭据获取账号密码
+	if ds.CredentialID != nil && *ds.CredentialID != "" {
+		credService := services.NewCredentialService()
+		credential, err := credService.GetByID(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据不存在")
+			return
+		}
+
+		username = credential.Username
+		password, err = credService.GetDecryptedPassword(*ds.CredentialID)
+		if err != nil {
+			common.Error(c, 500, "凭据密码解密失败")
+			return
+		}
+	} else {
+		// 使用数据源自己的账号密码
+		username = ds.Username
+		password, err = crypto.Decrypt(ds.Password)
+		if err != nil {
+			common.Error(c, 500, "密码解密失败")
+			return
+		}
 	}
 
 	// 直接查询字段列表
 	mysqlService := services.NewMySQLMetadataService()
-	columns, err := mysqlService.GetTableColumns(ds.Host, ds.Port, ds.Username, password, database, table)
+	columns, err := mysqlService.GetTableColumns(ds.Host, ds.Port, username, password, database, table)
 	if err != nil {
 		common.Error(c, 500, fmt.Sprintf("获取字段列表失败: %v", err))
 		return

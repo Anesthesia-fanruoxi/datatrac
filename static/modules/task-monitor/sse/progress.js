@@ -26,7 +26,7 @@
             this.eventSource.addEventListener('progress', (e) => {
                 try {
                     const progress = JSON.parse(e.data);
-                    if (window.TaskMonitorDetail) {
+                    if (window.TaskMonitorDetail && typeof window.TaskMonitorDetail.updateProgressUI === 'function') {
                         window.TaskMonitorDetail.updateProgressUI(progress);
                     }
                 } catch (error) {

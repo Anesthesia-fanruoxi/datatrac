@@ -159,6 +159,11 @@ func (r *MySQLReader) GetDB() *sql.DB {
 	return r.db
 }
 
+// Reset 重置读取器到初始位置（用于多目标源同步时重新读取）
+func (r *MySQLReader) Reset() {
+	r.offset = 0
+}
+
 // GetDatabaseCharset 获取数据库字符集和排序规则
 func (r *MySQLReader) GetDatabaseCharset(database string) (charset string, collation string, err error) {
 	query := `SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME 

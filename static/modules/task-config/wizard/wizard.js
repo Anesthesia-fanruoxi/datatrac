@@ -129,6 +129,12 @@
                             if (config.target_id) {
                                 this.taskData.target_id = config.target_id;
                             }
+                            // 支持多目标源
+                            if (config.target_ids && config.target_ids.length > 0) {
+                                this.taskData.target_ids = config.target_ids;
+                            } else if (config.target_id) {
+                                this.taskData.target_ids = [config.target_id];
+                            }
                             
                             // 填充表选择配置（步骤2）
                             if (config.selected_databases) {

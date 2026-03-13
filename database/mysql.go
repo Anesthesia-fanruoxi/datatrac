@@ -55,6 +55,7 @@ func InitDB() error {
 // autoMigrate 自动迁移表结构
 func autoMigrate() error {
 	err := DB.AutoMigrate(
+		&models.Credential{},
 		&models.DataSource{},
 		&models.SyncTask{},
 	)

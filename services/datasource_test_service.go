@@ -46,19 +46,44 @@ func (s *DataSourceService) TestConnectionByID(id string) (*TestConnectionRespon
 		return nil, fmt.Errorf("数据源不存在")
 	}
 
-	password, err := s.crypto.Decrypt(ds.Password)
-	if err != nil {
-		return &TestConnectionResponse{
-			Success: false,
-			Message: "密码解密失败",
-		}, nil
+	var username, password string
+
+	// 如果使用凭据，从凭据获取账号密码
+	if ds.CredentialID != nil && *ds.CredentialID != "" {
+		credService := NewCredentialService()
+		credential, err := credService.GetByID(*ds.CredentialID)
+		if err != nil {
+			return &TestConnectionResponse{
+				Success: false,
+				Message: "凭据不存在",
+			}, nil
+		}
+
+		username = credential.Username
+		password, err = credService.GetDecryptedPassword(*ds.CredentialID)
+		if err != nil {
+			return &TestConnectionResponse{
+				Success: false,
+				Message: "凭据密码解密失败",
+			}, nil
+		}
+	} else {
+		// 使用数据源自己的账号密码
+		username = ds.Username
+		password, err = s.crypto.Decrypt(ds.Password)
+		if err != nil {
+			return &TestConnectionResponse{
+				Success: false,
+				Message: "密码解密失败",
+			}, nil
+		}
 	}
 
 	req := &TestConnectionRequest{
 		Type:         ds.Type,
 		Host:         ds.Host,
 		Port:         ds.Port,
-		Username:     ds.Username,
+		Username:     username,
 		Password:     password,
 		DatabaseName: ds.DatabaseName,
 	}

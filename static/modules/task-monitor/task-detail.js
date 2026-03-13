@@ -114,6 +114,7 @@
             
             // 从 currentTask 获取任务状态信息
             const taskStatus = this.currentTask?.status || 'configured';
+            const isRunning = this.currentTask?.is_running === true || taskStatus === 'running';
             // 判断是否已完成
             const isCompleted = taskStatus === 'completed' || 
                                (progress.completed_tables === progress.total_tables && progress.total_tables > 0);

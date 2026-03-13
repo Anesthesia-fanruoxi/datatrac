@@ -61,6 +61,13 @@
             document.getElementById('dsPassword').required = true;
             document.getElementById('dsPassword').placeholder = '请输入密码';
             
+            // 重置认证方式为手动输入
+            document.getElementById('authType').value = 'manual';
+            this.toggleAuthType();
+            
+            // 加载凭据列表
+            this.loadCredentials();
+            
             // 添加ESC键关闭功能
             this.modalEscHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -82,12 +89,24 @@
                     document.getElementById('dsType').value = ds.type;
                     document.getElementById('dsHost').value = ds.host;
                     document.getElementById('dsPort').value = ds.port;
-                    document.getElementById('dsUsername').value = ds.username;
                     document.getElementById('dsDatabase').value = ds.database_name || '';
-                    document.getElementById('dsPassword').value = '';
-                    document.getElementById('dsPassword').placeholder = '留空表示不修改';
-                    document.getElementById('dsPassword').required = false;
                     
+                    // 加载凭据列表
+                    await this.loadCredentials();
+                    
+                    // 判断是使用凭据还是手动输入
+                    if (ds.credential_id) {
+                        document.getElementById('authType').value = 'credential';
+                        document.getElementById('dsCredential').value = ds.credential_id;
+                    } else {
+                        document.getElementById('authType').value = 'manual';
+                        document.getElementById('dsUsername').value = ds.username;
+                        document.getElementById('dsPassword').value = '';
+                        document.getElementById('dsPassword').placeholder = '留空表示不修改';
+                        document.getElementById('dsPassword').required = false;
+                    }
+                    
+                    this.toggleAuthType();
                     document.getElementById('dsType').dispatchEvent(new Event('change'));
                     document.getElementById('modalTitle').textContent = '编辑数据源';
                     document.getElementById('datasourceModal').style.display = 'block';
@@ -173,15 +192,37 @@
             e.preventDefault();
             
             const id = document.getElementById('datasourceId').value;
+            const authType = document.getElementById('authType').value;
+            
             const data = {
                 name: document.getElementById('dsName').value,
                 type: document.getElementById('dsType').value,
                 host: document.getElementById('dsHost').value,
                 port: parseInt(document.getElementById('dsPort').value),
-                username: document.getElementById('dsUsername').value,
-                password: document.getElementById('dsPassword').value,
                 database_name: document.getElementById('dsDatabase').value
             };
+
+            // 根据认证方式设置不同的字段
+            if (authType === 'credential') {
+                const credentialId = document.getElementById('dsCredential').value;
+                if (!credentialId) {
+                    Toast.warning('请选择凭据');
+                    return;
+                }
+                data.credential_id = credentialId;
+            } else {
+                data.username = document.getElementById('dsUsername').value;
+                data.password = document.getElementById('dsPassword').value;
+                
+                if (!data.username) {
+                    Toast.warning('请输入用户名');
+                    return;
+                }
+                if (!id && !data.password) {
+                    Toast.warning('请输入密码');
+                    return;
+                }
+            }
 
             try {
                 const url = id ? `/api/v1/datasources/${id}` : '/api/v1/datasources';
@@ -197,6 +238,73 @@
             } catch (error) {
                 Toast.error('操作失败: ' + error.message);
             }
+        },
+        
+        // 加载凭据列表
+        loadCredentials: async function() {
+            try {
+                const result = await HttpUtils.get('/api/v1/credentials');
+                const select = document.getElementById('dsCredential');
+                
+                if (result.code === 200 && result.data) {
+                    select.innerHTML = '<option value="">请选择凭据</option>' + 
+                        result.data.map(cred => 
+                            `<option value="${cred.id}">${cred.name} (${cred.username})</option>`
+                        ).join('');
+                }
+            } catch (error) {
+                console.error('加载凭据列表失败:', error);
+            }
+        },
+        
+        // 切换认证方式
+        toggleAuthType: function() {
+            const authType = document.getElementById('authType').value;
+            const credentialGroup = document.getElementById('credentialGroup');
+            const manualAuthGroup = document.getElementById('manualAuthGroup');
+            
+            if (authType === 'credential') {
+                credentialGroup.style.display = 'block';
+                manualAuthGroup.style.display = 'none';
+                // 清空手动输入的字段
+                document.getElementById('dsUsername').value = '';
+                document.getElementById('dsPassword').value = '';
+            } else {
+                credentialGroup.style.display = 'none';
+                manualAuthGroup.style.display = 'block';
+                // 清空凭据选择
+                document.getElementById('dsCredential').value = '';
+            }
+        },
+
+        // 打开管理凭据弹框
+        openCredentialModal: function() {
+            const el = document.getElementById('credentialManageModal');
+            if (el) {
+                el.style.display = 'flex';
+            }
+        },
+
+        // 关闭管理凭据弹框
+        closeCredentialModal: function() {
+            const el = document.getElementById('credentialManageModal');
+            if (el) {
+                el.style.display = 'none';
+            }
+        },
+
+        // 在新窗口打开凭据管理
+        openCredentialsInNewWindow: function() {
+            window.open('/credentials', '_blank');
+        },
+
+        // 刷新凭据列表并关闭弹框
+        refreshCredentialsAndClose: async function() {
+            await this.loadCredentials();
+            if (typeof Toast !== 'undefined') {
+                Toast.success('已刷新凭据列表');
+            }
+            this.closeCredentialModal();
         }
     };
 })();

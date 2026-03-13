@@ -27,6 +27,11 @@
             </a>
         </li>
         <li>
+            <a href="/credentials" class="{{if eq .Active "credentials"}}active{{end}}">
+                <i class="bi bi-key"></i> 凭据管理
+            </a>
+        </li>
+        <li>
             <a href="/task-config" class="{{if eq .Active "task-config"}}active{{end}}">
                 <i class="bi bi-gear"></i> 任务配置
             </a>
@@ -116,13 +121,35 @@
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">用户名 <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control" id="dsUsername" required>
+                    <label class="form-label">认证方式 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="authType" onchange="DataSourceCore.toggleAuthType()">
+                        <option value="manual">手动输入</option>
+                        <option value="credential">使用凭据</option>
+                    </select>
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label">密码 <span class="text-danger">*</span></label>
-                    <input type="password" class="form-control" id="dsPassword" required>
+                <div id="credentialGroup" style="display:none;">
+                    <div class="mb-3">
+                        <label class="form-label">选择凭据 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="dsCredential">
+                            <option value="">请选择凭据</option>
+                        </select>
+                        <div class="form-text">
+                            <a href="#" id="btnManageCredential">管理凭据</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="manualAuthGroup">
+                    <div class="mb-3">
+                        <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="dsUsername">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">密码 <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control" id="dsPassword">
+                    </div>
                 </div>
 
                 <div class="mb-3" id="dbNameGroup" style="display:none;">
@@ -141,6 +168,30 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- 管理凭据弹框 -->
+<div id="credentialManageModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1001; backdrop-filter: blur(5px); align-items:center; justify-content:center;" onclick="if(event.target===this) DataSourceCore.closeCredentialModal()">
+    <div class="modal-content bg-white rounded-3 shadow" style="max-width: 400px; margin: auto;">
+        <div class="modal-header">
+            <h5 class="modal-title">管理凭据</h5>
+            <button type="button" class="btn-close" aria-label="关闭" onclick="DataSourceCore.closeCredentialModal()"></button>
+        </div>
+        <div class="modal-body">
+            <p class="text-secondary small">如需添加或修改凭据，可在新窗口中操作，然后点击「刷新凭据列表」更新下拉选项。</p>
+            <div class="d-flex flex-column gap-2 mt-2">
+                <button type="button" class="btn btn-outline-primary" onclick="DataSourceCore.openCredentialsInNewWindow()">
+                    <i class="bi bi-box-arrow-up-right"></i> 在新窗口打开凭据管理
+                </button>
+                <button type="button" class="btn btn-primary" onclick="DataSourceCore.refreshCredentialsAndClose()">
+                    <i class="bi bi-arrow-clockwise"></i> 刷新凭据列表
+                </button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="DataSourceCore.closeCredentialModal()">关闭</button>
         </div>
     </div>
 </div>

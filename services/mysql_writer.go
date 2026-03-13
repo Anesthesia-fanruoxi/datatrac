@@ -280,3 +280,8 @@ func (w *MySQLWriter) Close() error {
 	}
 	return nil
 }
+
+// GetDB 获取数据库连接
+func (w *MySQLWriter) GetDB() *sql.DB {
+	return w.db
+}

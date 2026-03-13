@@ -130,12 +130,29 @@ func (s *TaskControlService) startFullSyncTask(taskID string) error {
 
 		engine := NewSyncEngine()
 
+		// 从Redis获取配置
+		configCache := NewConfigCacheService()
+		config, _ := configCache.GetTaskConfigWithFallback(taskID)
+
+		// 判断是否只同步表结构
+		isStructureOnly := config.SyncConfig.SyncStructureOnly
+
 		// ========== 阶段1: 初始化（创建数据库和表结构） ==========
-		logService.Info(taskID, "========== 开始全量同步 ==========")
-		logService.Info(taskID, "步骤 1/2: 初始化阶段")
+		if isStructureOnly {
+			logService.Info(taskID, "========== 只同步表结构 ==========")
+		} else {
+			logService.Info(taskID, "========== 开始全量同步 ==========")
+			logService.Info(taskID, "步骤 1/2: 初始化阶段")
+		}
 
 		if err := engine.InitializeWorker(ctx, taskID, sortedUnitNames); err != nil {
 			logService.Error(taskID, fmt.Sprintf("初始化阶段失败: %v", err))
+			return
+		}
+
+		// 如果只同步表结构，初始化完成后直接结束
+		if isStructureOnly {
+			logService.Info(taskID, "========== 表结构同步完成 ==========")
 			return
 		}
 

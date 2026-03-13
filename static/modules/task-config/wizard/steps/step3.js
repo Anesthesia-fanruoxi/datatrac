@@ -8,7 +8,8 @@
             const config = taskData.sync_config || {
                 sync_mode: 'full',
                 error_strategy: 'skip',
-                table_exists_strategy: 'truncate'
+                table_exists_strategy: 'truncate',
+                sync_structure_only: false
             };
             
             container.innerHTML = `
@@ -18,7 +19,7 @@
                             <div class="col-md-6">
                                 <div class="mb-4">
                                     <label class="form-label fw-bold mb-3">同步模式 <span class="text-danger">*</span></label>
-                                    <div class="d-flex gap-2">
+                                    <div class="d-flex gap-2 flex-wrap">
                                         <div class="form-check-card flex-fill">
                                             <input class="form-check-input" type="radio" name="syncMode" id="syncMode-full" value="full" ${config.sync_mode === 'full' ? 'checked' : ''} required>
                                             <label class="form-check-label d-flex align-items-center" for="syncMode-full">
@@ -39,10 +40,20 @@
                                                 </div>
                                             </label>
                                         </div>
+                                        <div class="form-check-card flex-fill">
+                                            <input class="form-check-input" type="radio" name="syncMode" id="syncMode-structure" value="structure" ${config.sync_mode === 'structure' ? 'checked' : ''}>
+                                            <label class="form-check-label d-flex align-items-center" for="syncMode-structure">
+                                                <i class="bi bi-table text-info me-2"></i>
+                                                <div>
+                                                    <div>只同步表结构</div>
+                                                    <small class="text-muted">仅同步表结构，不同步数据</small>
+                                                </div>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
                                 
-                                <div class="mb-4">
+                                <div class="mb-4" id="errorStrategySection">
                                     <label class="form-label fw-bold mb-3">错误处理策略 <span class="text-danger">*</span></label>
                                     <div class="d-flex gap-2">
                                         <div class="form-check-card flex-fill">
@@ -68,7 +79,7 @@
                                     </div>
                                 </div>
                                 
-                                <div class="mb-4">
+                                <div class="mb-4" id="tableStrategySection">
                                     <label class="form-label fw-bold mb-3">目标表存在策略 <span class="text-danger">*</span></label>
                                     <div class="d-flex gap-2">
                                         <div class="form-check-card flex-fill">
@@ -128,9 +139,15 @@
                                         <li>批次大小根据表大小自适应</li>
                                     </ul>
                                     <p class="mb-2"><strong>增量同步：</strong></p>
-                                    <ul class="mb-0">
+                                    <ul class="mb-2">
                                         <li>Binlog监听单线程（保证顺序）</li>
                                         <li>事件消费自动优化</li>
+                                    </ul>
+                                    <p class="mb-2"><strong>只同步表结构：</strong></p>
+                                    <ul class="mb-0">
+                                        <li>对比源表和目标表结构差异</li>
+                                        <li>自动执行ALTER语句</li>
+                                        <li>新增字段直接ADD</li>
                                     </ul>
                                 </div>
                             </div>
@@ -147,14 +164,44 @@
         bindEvents: function(taskData) {
             const form = document.getElementById('syncConfigForm');
             
+            // 同步模式切换时，隐藏/显示相关选项
+            const syncModeRadios = document.querySelectorAll('input[name="syncMode"]');
+            const errorStrategySection = document.getElementById('errorStrategySection');
+            const tableStrategySection = document.getElementById('tableStrategySection');
+            
+            const updateVisibility = () => {
+                const syncModeRadio = document.querySelector('input[name="syncMode"]:checked');
+                const syncMode = syncModeRadio ? syncModeRadio.value : 'full';
+                
+                if (syncMode === 'structure') {
+                    // 只同步表结构模式
+                    if (errorStrategySection) errorStrategySection.style.display = 'none';
+                    if (tableStrategySection) tableStrategySection.style.display = 'none';
+                } else {
+                    // 全量/增量同步模式
+                    if (errorStrategySection) errorStrategySection.style.display = 'block';
+                    if (tableStrategySection) tableStrategySection.style.display = 'block';
+                }
+            };
+            
+            syncModeRadios.forEach(radio => {
+                radio.addEventListener('change', updateVisibility);
+            });
+            
+            // 初始化可见性
+            updateVisibility();
+            
             // 实时保存配置
             form.addEventListener('change', function() {
                 const syncModeRadio = document.querySelector('input[name="syncMode"]:checked');
                 const errorStrategyRadio = document.querySelector('input[name="errorStrategy"]:checked');
                 const tableStrategyRadio = document.querySelector('input[name="tableExistsStrategy"]:checked');
                 
+                const syncMode = syncModeRadio ? syncModeRadio.value : 'full';
+                
                 taskData.sync_config = {
-                    sync_mode: syncModeRadio ? syncModeRadio.value : 'full',
+                    sync_mode: syncMode,
+                    sync_structure_only: syncMode === 'structure',
                     error_strategy: errorStrategyRadio ? errorStrategyRadio.value : 'skip',
                     table_exists_strategy: tableStrategyRadio ? tableStrategyRadio.value : 'truncate'
                 };
@@ -174,9 +221,12 @@
             const errorStrategyRadio = document.querySelector('input[name="errorStrategy"]:checked');
             const tableStrategyRadio = document.querySelector('input[name="tableExistsStrategy"]:checked');
             
+            const syncMode = syncModeRadio ? syncModeRadio.value : 'full';
+            
             // 保存配置
             taskData.sync_config = {
-                sync_mode: syncModeRadio ? syncModeRadio.value : 'full',
+                sync_mode: syncMode,
+                sync_structure_only: syncMode === 'structure',
                 error_strategy: errorStrategyRadio ? errorStrategyRadio.value : 'skip',
                 table_exists_strategy: tableStrategyRadio ? tableStrategyRadio.value : 'truncate'
             };

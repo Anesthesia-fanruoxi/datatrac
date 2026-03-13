@@ -28,6 +28,7 @@ func SetupRouter() *gin.Engine {
 	// 页面路由
 	r.GET("/", pageCtrl.Index)
 	r.GET("/datasources", pageCtrl.DataSource)
+	r.GET("/credentials", pageCtrl.Credential)
 	r.GET("/task-config", pageCtrl.TaskConfig)
 	r.GET("/task-monitor", pageCtrl.TaskMonitor)
 	r.GET("/task-monitor/:id", pageCtrl.TaskMonitorWithID)
@@ -42,6 +43,17 @@ func SetupRouter() *gin.Engine {
 	// API 路由组
 	apiGroup := r.Group("/api/v1")
 	{
+		// 凭据管理
+		credAPI := api.NewCredentialAPI()
+		credentials := apiGroup.Group("/credentials")
+		{
+			credentials.GET("", credAPI.List)
+			credentials.POST("", credAPI.Create)
+			credentials.GET("/:id", credAPI.GetByID)
+			credentials.PUT("/:id", credAPI.Update)
+			credentials.DELETE("/:id", credAPI.Delete)
+		}
+
 		// 数据源管理
 		dsAPI := api.NewDataSourceAPI()
 		dsSSEAPI := api.NewDataSourceSSEAPI()

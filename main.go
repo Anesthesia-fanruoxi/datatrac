@@ -41,7 +41,12 @@ func main() {
 	// 5. 设置 Gin 模式
 	gin.SetMode(config.GlobalConfig.Server.Mode)
 
-	// 6. 设置路由
+	// 6. 启动数据源健康检查
+	dsSSE := services.NewDataSourceSSEService()
+	dsSSE.StartHealthCheck()
+	log.Println("✅ 数据源健康检查已启动")
+
+	// 7. 设置路由
 	r := routers.SetupRouter()
 
 	// 7. 启动服务器

@@ -28,8 +28,8 @@ func (api *DataSourceSSEAPI) StreamTestResults(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
 
-	// 创建客户端通道
-	client := make(chan services.DataSourceTestResult, 10)
+	// 创建客户端通道（接收数组）
+	client := make(chan []services.DataSourceTestResult, 10)
 
 	// 添加客户端
 	api.sseService.AddClient(client)
@@ -37,7 +37,7 @@ func (api *DataSourceSSEAPI) StreamTestResults(c *gin.Context) {
 	// 确保清理资源
 	defer func() {
 		api.sseService.RemoveClient(client)
-		close(client) // 在移除后关闭 channel
+		close(client)
 	}()
 
 	// 获取响应写入器
@@ -48,8 +48,8 @@ func (api *DataSourceSSEAPI) StreamTestResults(c *gin.Context) {
 		return
 	}
 
-	// 启动测试协程
-	go api.sseService.TestAllDataSources(client)
+	// 立即推送当前缓存的测试结果
+	api.sseService.SendCachedResults(client)
 
 	// 监听客户端断开
 	notify := c.Request.Context().Done()
@@ -58,15 +58,13 @@ func (api *DataSourceSSEAPI) StreamTestResults(c *gin.Context) {
 	for {
 		select {
 		case <-notify:
-			// 客户端断开连接
 			return
-		case result, ok := <-client:
+		case results, ok := <-client:
 			if !ok {
-				// 通道关闭
 				return
 			}
-			// 发送SSE消息
-			_, err := io.WriteString(w, services.FormatDataSourceSSEMessage(result))
+			// 发送SSE消息（数组格式）
+			_, err := io.WriteString(w, services.FormatDataSourceSSEMessage(results))
 			if err != nil {
 				return
 			}

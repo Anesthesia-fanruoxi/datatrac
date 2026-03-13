@@ -31,6 +31,9 @@ type TaskProgress struct {
 	TotalRecords     *int64   `json:"total_records,omitempty"`
 	ProcessedRecords *int64   `json:"processed_records,omitempty"`
 
+	// 全量同步目标源级别统计（仅 sync_mode=full 时有值）
+	TargetStats []*TargetProgress `json:"target_stats,omitempty"`
+
 	// 增量同步数据库级别统计（仅 sync_mode=incremental 时有值，始终返回）
 	DatabaseStats []*IncrementalDatabaseStats `json:"database_stats,omitempty"`
 
@@ -67,6 +70,9 @@ func (s *TaskProgressService) GetTaskProgress(taskID string, dbName string) (*Ta
 	} else {
 		// 全量同步模式：返回整体进度
 		s.fillFullSyncProgress(taskID, &task, progress)
+
+		// 全量同步模式：获取目标源级别统计
+		progress.TargetStats = progressManager.GetAllTargetStats(taskID)
 	}
 
 	return progress, nil

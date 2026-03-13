@@ -34,7 +34,8 @@ type CreateTaskRequest struct {
 // UpdateTaskConfigRequest 更新任务配置请求
 type UpdateTaskConfigRequest struct {
 	SourceID          string              `json:"source_id" binding:"required"`
-	TargetID          string              `json:"target_id" binding:"required"`
+	TargetID          string              `json:"target_id"`  // 保留第一个目标源（兼容）
+	TargetIDs         []string            `json:"target_ids"` // 多个目标源ID列表
 	SelectedDatabases []DatabaseSelection `json:"selected_databases"`
 	SyncConfig        SyncConfigParams    `json:"sync_config"`
 }
@@ -60,6 +61,7 @@ type SyncConfigParams struct {
 	SyncMode            string `json:"sync_mode"`             // full/incremental
 	ErrorStrategy       string `json:"error_strategy"`        // pause/skip
 	TableExistsStrategy string `json:"table_exists_strategy"` // skip/drop/truncate
+	SyncStructureOnly   bool   `json:"sync_structure_only"`   // 只同步表结构（不同步数据）
 
 	// 已废弃字段（保留向后兼容，但不再使用）
 	BatchSize   int `json:"batch_size,omitempty"`   // 已废弃：现在使用自适应批次大小
@@ -69,7 +71,8 @@ type SyncConfigParams struct {
 // TaskConfig 任务配置（存储在config字段的JSON）
 type TaskConfig struct {
 	SourceID          string              `json:"source_id"`
-	TargetID          string              `json:"target_id"`
+	TargetID          string              `json:"target_id"`  // 保留第一个目标源（兼容）
+	TargetIDs         []string            `json:"target_ids"` // 多个目标源ID列表
 	SelectedDatabases []DatabaseSelection `json:"selected_databases"`
 	SyncConfig        SyncConfigParams    `json:"sync_config"`
 }
@@ -139,15 +142,29 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 		return nil, fmt.Errorf("任务正在运行，无法修改配置")
 	}
 
-	// 验证数据源
-	if err := s.validateDataSources(task, req.SourceID, req.TargetID); err != nil {
-		return nil, err
+	// 处理多目标源
+	// 优先使用 TargetIDs，如果为空则兼容旧的 TargetID
+	targetIDs := req.TargetIDs
+	if len(targetIDs) == 0 && req.TargetID != "" {
+		targetIDs = []string{req.TargetID}
+	}
+
+	if len(targetIDs) == 0 {
+		return nil, fmt.Errorf("至少需要选择一个目标源")
+	}
+
+	// 验证数据源（验证所有目标源）
+	for _, targetID := range targetIDs {
+		if err := s.validateDataSources(task, req.SourceID, targetID); err != nil {
+			return nil, err
+		}
 	}
 
 	// 构建配置
 	config := TaskConfig{
 		SourceID:          req.SourceID,
-		TargetID:          req.TargetID,
+		TargetID:          targetIDs[0], // 保留第一个目标源（兼容）
+		TargetIDs:         targetIDs,
 		SelectedDatabases: req.SelectedDatabases,
 		SyncConfig:        req.SyncConfig,
 	}
@@ -159,7 +176,7 @@ func (s *TaskService) UpdateConfig(id string, req *UpdateTaskConfigRequest) (*mo
 
 	// 更新任务
 	task.SourceID = req.SourceID
-	task.TargetID = req.TargetID
+	task.TargetID = targetIDs[0] // 保留第一个目标源（兼容）
 	task.Config = string(configJSON)
 	task.Status = "configured" // 更新状态为已配置
 	task.CurrentStep = ""      // 清除当前步骤

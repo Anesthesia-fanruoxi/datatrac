@@ -15,6 +15,11 @@
                 minute: '2-digit'
             });
         },
+
+        // formatDateTime 兼容旧调用（等同 formatDate）
+        formatDateTime: function(dateString) {
+            return this.formatDate(dateString);
+        },
         
         // 格式化文件大小
         formatSize: function(bytes) {

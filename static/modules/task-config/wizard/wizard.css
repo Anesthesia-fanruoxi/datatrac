@@ -414,3 +414,16 @@
 #wizardModal .tree-node-item:hover {
     background: #f8f9fa;
 }
+
+/* 步骤1 - 目标数据源卡片拾取样式 */
+#wizardModal .target-ds-card-item {
+    user-select: none;
+}
+#wizardModal .target-ds-card-item:hover {
+    border-color: #667eea !important;
+    background: rgba(102, 126, 234, 0.06) !important;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12) !important;
+}
+#wizardModal .target-ds-card-item.border-primary:hover {
+    background: rgba(102, 126, 234, 0.14) !important;
+}

@@ -2,6 +2,13 @@
 (function() {
     'use strict';
     
+    function escapeHtml(str) {
+        if (str == null) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+    
     window.TaskWizardStep1 = {
         sourceDatasources: [],
         targetDatasources: [],
@@ -42,7 +49,7 @@
                                 </label>
                                 <p class="text-muted small mb-2">类型: ${task.source_type === 'mysql' ? 'MySQL' : 'Elasticsearch'}</p>
                                 <div id="source-select-container">
-                                    ${this.renderDatasourceSelect(this.sourceDatasources, 'source', taskData.source_id, taskData.target_id)}
+                                    ${this.renderSourceDatasourceSelect(this.sourceDatasources, taskData.source_id)}
                                 </div>
                             </div>
                         </div>
@@ -53,8 +60,9 @@
                                     <span class="text-danger">*</span>
                                 </label>
                                 <p class="text-muted small mb-2">类型: ${task.target_type === 'mysql' ? 'MySQL' : 'Elasticsearch'}</p>
+                                <p class="text-muted small mb-2">点击卡片多选目标数据源</p>
                                 <div id="target-select-container">
-                                    ${this.renderDatasourceSelect(this.targetDatasources, 'target', taskData.target_id, taskData.source_id)}
+                                    ${this.renderTargetDatasourceSelect(this.targetDatasources, taskData.target_ids, taskData.source_id)}
                                 </div>
                             </div>
                         </div>
@@ -74,80 +82,86 @@
             }
         },
         
-        // 渲染数据源下拉框
-        renderDatasourceSelect: function(datasources, type, selectedId, excludeId) {
+        // 渲染源数据源下拉框（单选）
+        renderSourceDatasourceSelect: function(datasources, selectedId) {
             if (datasources.length === 0) {
                 return '<div class="alert alert-warning">暂无可用数据源，请先到"数据源配置"页面创建数据源</div>';
             }
             
-            // 过滤掉已被另一方选择的数据源
-            const filteredDatasources = excludeId 
-                ? datasources.filter(ds => ds.id !== excludeId)
-                : datasources;
-            
-            if (filteredDatasources.length === 0) {
-                return '<div class="alert alert-warning">没有可用的数据源（已被另一方选择）</div>';
-            }
-            
-            const options = filteredDatasources.map(ds => {
+            const options = datasources.map(ds => {
                 const selected = selectedId === ds.id ? 'selected' : '';
                 return `<option value="${ds.id}" ${selected}>${ds.name} (${ds.host}:${ds.port})</option>`;
             }).join('');
             
             return `
-                <select class="form-select form-select-lg" id="datasource-${type}" data-type="${type}">
+                <select class="form-select form-select-lg" id="datasource-source" data-type="source">
                     <option value="">请选择数据源</option>
                     ${options}
                 </select>
             `;
         },
         
-        // 更新目标数据源下拉框
-        updateTargetSelect: function(taskData) {
-            const container = document.getElementById('target-select-container');
-            if (container) {
-                container.innerHTML = this.renderDatasourceSelect(
-                    this.targetDatasources, 
-                    'target', 
-                    taskData.target_id, 
-                    taskData.source_id
-                );
-                
-                // 重新绑定目标下拉框事件
-                const targetSelect = document.getElementById('datasource-target');
-                if (targetSelect) {
-                    targetSelect.addEventListener('change', () => {
-                        taskData.target_id = targetSelect.value;
-                        this.updateSourceSelect(taskData);
-                    });
-                }
+        // 渲染目标数据源卡片（多选）
+        renderTargetDatasourceSelect: function(datasources, selectedIds, excludeId) {
+            if (datasources.length === 0) {
+                return '<div class="alert alert-warning">暂无可用数据源，请先到"数据源配置"页面创建数据源</div>';
             }
-        },
-        
-        // 更新源数据源下拉框
-        updateSourceSelect: function(taskData) {
-            const container = document.getElementById('source-select-container');
-            if (container) {
-                container.innerHTML = this.renderDatasourceSelect(
-                    this.sourceDatasources, 
-                    'source', 
-                    taskData.source_id, 
-                    taskData.target_id
-                );
-                
-                // 重新绑定源下拉框事件
-                const sourceSelect = document.getElementById('datasource-source');
-                if (sourceSelect) {
-                    sourceSelect.addEventListener('change', () => {
-                        taskData.source_id = sourceSelect.value;
-                        this.updateTargetSelect(taskData);
-                    });
-                }
+            
+            // 过滤掉源数据源
+            const availableDatasources = excludeId
+                ? datasources.filter(ds => ds.id !== excludeId)
+                : datasources;
+            
+            if (availableDatasources.length === 0) {
+                return '<div class="alert alert-warning">没有可用的目标数据源</div>';
             }
+            
+            // 处理selectedIds（兼容旧的target_id）
+            if (!selectedIds || selectedIds.length === 0) {
+                selectedIds = [];
+            }
+            
+            const selectedIdSet = new Set((selectedIds || []).map(String));
+            const cardsHtml = availableDatasources.map(ds => {
+                const selected = selectedIdSet.has(String(ds.id));
+                const cardClass = selected
+                    ? 'target-ds-card border-primary bg-primary bg-opacity-10 shadow-sm'
+                    : 'target-ds-card border';
+                const checkIcon = selected ? '<i class="bi bi-check-circle-fill text-primary position-absolute top-0 end-0 m-2"></i>' : '';
+                return `
+                    <div class="target-ds-card-wrapper col-6 col-lg-12 mb-2" data-ds-id="${ds.id}">
+                        <div class="card ${cardClass} target-ds-card-item h-100 position-relative target-ds-card-clickable"
+                             style="transition: all 0.2s ease; min-height: 64px; cursor: pointer;">
+                            ${checkIcon}
+                            <div class="card-body py-2 px-3">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-database text-secondary me-2" style="font-size: 1.25rem;"></i>
+                                    <div class="flex-grow-1 min-w-0">
+                                        <div class="fw-medium text-truncate">${escapeHtml(ds.name)}</div>
+                                        <small class="text-muted">${escapeHtml(ds.host)}:${ds.port}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            return `
+                <div class="row g-2" id="datasource-target-cards">
+                    ${cardsHtml}
+                </div>
+                <small class="text-muted d-block mt-2">已选 <span id="target-ds-selected-count">${selectedIds.length}</span> 个</small>
+            `;
         },
         
         // 绑定事件
         bindEvents: function(taskData) {
+            // 初始化target_ids
+            if (!taskData.target_ids) {
+                taskData.target_ids = [];
+            }
+            
             // 监听源数据源选择
             const sourceSelect = document.getElementById('datasource-source');
             if (sourceSelect) {
@@ -158,14 +172,66 @@
                 });
             }
             
-            // 监听目标数据源选择
-            const targetSelect = document.getElementById('datasource-target');
-            if (targetSelect) {
-                targetSelect.addEventListener('change', () => {
-                    taskData.target_id = targetSelect.value;
-                    // 更新源数据源下拉框，排除已选择的目标
-                    this.updateSourceSelect(taskData);
+            // 监听目标数据源卡片点击（多选）
+            this.bindTargetCardEvents(taskData);
+        },
+        
+        // 绑定目标数据源卡片点击事件
+        bindTargetCardEvents: function(taskData) {
+            document.querySelectorAll('.target-ds-card-item').forEach(card => {
+                card.addEventListener('click', () => {
+                    const wrapper = card.closest('.target-ds-card-wrapper');
+                    const dsId = wrapper.getAttribute('data-ds-id');
+                    const idx = (taskData.target_ids || []).indexOf(dsId);
+                    if (idx >= 0) {
+                        taskData.target_ids.splice(idx, 1);
+                    } else {
+                        if (!taskData.target_ids) taskData.target_ids = [];
+                        taskData.target_ids.push(dsId);
+                    }
+                    taskData.target_id = (taskData.target_ids && taskData.target_ids[0]) || '';
+                    this.updateTargetCardUi(taskData);
                 });
+            });
+        },
+        
+        // 更新目标数据源卡片选中状态与计数
+        updateTargetCardUi: function(taskData) {
+            const selectedIds = taskData.target_ids || [];
+            const selectedSet = new Set(selectedIds.map(String));
+            document.querySelectorAll('.target-ds-card-wrapper').forEach(wrapper => {
+                const dsId = wrapper.getAttribute('data-ds-id');
+                const card = wrapper.querySelector('.target-ds-card-item');
+                const selected = selectedSet.has(dsId);
+                if (selected) {
+                    card.classList.add('border-primary', 'bg-primary', 'bg-opacity-10', 'shadow-sm');
+                    card.classList.remove('border');
+                    if (!card.querySelector('.bi-check-circle-fill')) {
+                        const icon = document.createElement('i');
+                        icon.className = 'bi bi-check-circle-fill text-primary position-absolute top-0 end-0 m-2';
+                        card.appendChild(icon);
+                    }
+                } else {
+                    card.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10', 'shadow-sm');
+                    card.classList.add('border');
+                    const icon = card.querySelector('.bi-check-circle-fill');
+                    if (icon) icon.remove();
+                }
+            });
+            const countEl = document.getElementById('target-ds-selected-count');
+            if (countEl) countEl.textContent = selectedIds.length;
+        },
+        
+        // 更新目标数据源卡片区域
+        updateTargetSelect: function(taskData) {
+            const container = document.getElementById('target-select-container');
+            if (container) {
+                container.innerHTML = this.renderTargetDatasourceSelect(
+                    this.targetDatasources,
+                    taskData.target_ids,
+                    taskData.source_id
+                );
+                this.bindTargetCardEvents(taskData);
             }
         },
         
@@ -176,12 +242,12 @@
                 return false;
             }
             
-            if (!taskData.target_id) {
-                Toast.warning('请选择目标数据源');
+            if (!taskData.target_ids || taskData.target_ids.length === 0) {
+                Toast.warning('请至少选择一个目标数据源');
                 return false;
             }
             
-            if (taskData.source_id === taskData.target_id) {
+            if (taskData.target_ids.includes(taskData.source_id)) {
                 Toast.warning('源数据源和目标数据源不能相同');
                 return false;
             }

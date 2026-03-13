@@ -11,11 +11,14 @@
             
             this.eventSource = new EventSource('/api/v1/datasources/test/stream');
             
-            // 监听测试事件
+            // 监听测试事件（后端推送数组）
             this.eventSource.addEventListener('test', (e) => {
                 try {
-                    const result = JSON.parse(e.data);
-                    this.updateStatus(result);
+                    const results = JSON.parse(e.data);
+                    // 只处理数组格式
+                    if (Array.isArray(results)) {
+                        results.forEach(item => this.updateStatus(item));
+                    }
                 } catch (error) {
                     console.error('解析测试结果失败:', error);
                 }
@@ -37,6 +40,7 @@
         
         // 更新状态
         updateStatus: function(result) {
+            if (!result || !result.id) return;
             const statusCell = document.getElementById(`status-${result.id}`);
             if (!statusCell) return;
             

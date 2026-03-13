@@ -8,6 +8,7 @@
             const task = taskData.task;
             const syncConfig = taskData.sync_config || {};
             const selectedDatabases = taskData.selected_databases || [];
+            const targetIDs = taskData.target_ids || [];
             
             // 统计信息
             const totalTables = selectedDatabases.reduce((sum, db) => sum + (db.tables ? db.tables.length : 0), 0);
@@ -20,6 +21,9 @@
                 return sum + tables.filter(t => t.is_modified).length;
             }, 0);
             
+            // 获取同步模式文本
+            const syncModeText = this.getSyncModeText(syncConfig.sync_mode);
+            
             container.innerHTML = `
                 <div>
                     <div class="row">
@@ -29,6 +33,7 @@
                                 <table class="table table-sm">
                                     <tr><td>任务名称</td><td><strong>${task.name}</strong></td></tr>
                                     <tr><td>同步方向</td><td>${task.source_type} → ${task.target_type}</td></tr>
+                                    <tr><td>目标源数量</td><td><strong>${targetIDs.length} 个</strong></td></tr>
                                     <tr>
                                         <td>选中数据库</td>
                                         <td>
@@ -49,10 +54,12 @@
                             <div class="config-section mt-3">
                                 <h6><i class="bi bi-gear me-2"></i>同步配置</h6>
                                 <table class="table table-sm">
-                                    <tr><td>同步模式</td><td>${syncConfig.sync_mode === 'full' ? '全量同步' : '增量同步'}</td></tr>
+                                    <tr><td>同步模式</td><td><strong>${syncModeText}</strong></td></tr>
+                                    ${syncConfig.sync_mode !== 'structure' ? `
                                     <tr><td>错误策略</td><td>${syncConfig.error_strategy === 'skip' ? '跳过错误' : '遇错暂停'}</td></tr>
                                     <tr><td>表存在策略</td><td>${this.getTableStrategyText(syncConfig.table_exists_strategy)}</td></tr>
-                                    <tr><td colspan="2" class="text-muted"><small><i class="bi bi-cpu me-1"></i>批次大小和线程数将根据系统资源自动优化</small></td></tr>
+                                    ` : ''}
+                                    <tr><td colspan="2" class="text-muted"><small><i class="bi bi-cpu me-1"></i>${syncConfig.sync_mode === 'structure' ? '仅对比和同步表结构，不同步数据' : '批次大小和线程数将根据系统资源自动优化'}</small></td></tr>
                                 </table>
                             </div>
                         </div>
@@ -73,6 +80,16 @@
                     </div>
                 </div>
             `;
+        },
+        
+        // 获取同步模式文本
+        getSyncModeText: function(syncMode) {
+            const texts = {
+                'full': '全量同步',
+                'incremental': '增量同步',
+                'structure': '只同步表结构'
+            };
+            return texts[syncMode] || syncMode;
         },
         
         // 获取表存在策略文本

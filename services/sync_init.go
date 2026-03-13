@@ -6,6 +6,7 @@ import (
 	"datatrace/database"
 	"datatrace/models"
 	"fmt"
+	"strings"
 )
 
 // InitializeWorker 初始化Worker执行逻辑（串行处理所有表的初始化）
@@ -80,56 +81,81 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 	msg := fmt.Sprintf("需要初始化 %d 个数据库", len(dbGroups))
 	e.logService.Info(taskID, msg)
 
-	// 5. 创建所有数据库
-	for _, group := range dbGroups {
-		// 检查context是否被取消
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("初始化被取消: %v", ctx.Err())
-		default:
-		}
+	// 获取多目标源ID列表
+	targetIDs := config.TargetIDs
+	if len(targetIDs) == 0 {
+		// 兼容旧配置
+		targetIDs = []string{config.TargetID}
+	}
 
-		// 连接源数据库获取字符集
-		sourceDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-			task.SourceConn.Username, sourcePassword, task.SourceConn.Host, task.SourceConn.Port, group.sourceDB)
-
-		sourceDB, err := sql.Open("mysql", sourceDSN)
-		if err != nil {
-			e.logService.Error(taskID, fmt.Sprintf("连接源数据库 %s 失败: %v", group.sourceDB, err))
+	// 5. 创建所有数据库（为每个目标源创建）
+	for _, targetID := range targetIDs {
+		// 查询目标源
+		var targetDS models.DataSource
+		if err := database.DB.First(&targetDS, "id = ?", targetID).Error; err != nil {
+			e.logService.Error(taskID, fmt.Sprintf("查询目标源 %s 失败: %v", targetID, err))
 			continue
 		}
 
-		// 获取字符集
-		var charset, collation string
-		err = sourceDB.QueryRow("SELECT @@character_set_database, @@collation_database").Scan(&charset, &collation)
-		sourceDB.Close()
-
+		targetPwd, err := e.dsService.crypto.Decrypt(targetDS.Password)
 		if err != nil {
-			e.logService.Warning(taskID, fmt.Sprintf("获取数据库 %s 字符集失败，使用默认值: %v", group.sourceDB, err))
-			charset = "utf8mb4"
-			collation = "utf8mb4_general_ci"
+			e.logService.Error(taskID, fmt.Sprintf("解密目标源 %s 密码失败: %v", targetID, err))
+			continue
 		}
 
-		// 创建目标数据库
-		created, err := CreateDatabaseIfNotExists(
-			task.TargetConn.Host,
-			task.TargetConn.Port,
-			task.TargetConn.Username,
-			targetPassword,
-			group.targetDB,
-			charset,
-			collation,
-		)
+		e.logService.Info(taskID, fmt.Sprintf("初始化目标源: %s", targetDS.Name))
 
-		if err != nil {
-			e.logService.Error(taskID, fmt.Sprintf("创建数据库 %s 失败: %v", group.targetDB, err))
-			return fmt.Errorf("创建数据库失败: %v", err)
-		}
+		// 为该目标源创建所有数据库
+		for _, group := range dbGroups {
+			// 检查context是否被取消
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("初始化被取消: %v", ctx.Err())
+			default:
+			}
 
-		if created {
-			e.logService.Info(taskID, fmt.Sprintf("创建数据库: %s (字符集: %s, 排序规则: %s)", group.targetDB, charset, collation))
-		} else {
-			e.logService.Info(taskID, fmt.Sprintf("数据库已存在: %s", group.targetDB))
+			// 连接源数据库获取字符集
+			sourceDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
+				task.SourceConn.Username, sourcePassword, task.SourceConn.Host, task.SourceConn.Port, group.sourceDB)
+
+			sourceDB, err := sql.Open("mysql", sourceDSN)
+			if err != nil {
+				e.logService.Error(taskID, fmt.Sprintf("连接源数据库 %s 失败: %v", group.sourceDB, err))
+				continue
+			}
+
+			// 获取字符集
+			var charset, collation string
+			err = sourceDB.QueryRow("SELECT @@character_set_database, @@collation_database").Scan(&charset, &collation)
+			sourceDB.Close()
+
+			if err != nil {
+				e.logService.Warning(taskID, fmt.Sprintf("获取数据库 %s 字符集失败，使用默认值: %v", group.sourceDB, err))
+				charset = "utf8mb4"
+				collation = "utf8mb4_general_ci"
+			}
+
+			// 创建目标数据库
+			created, err := CreateDatabaseIfNotExists(
+				targetDS.Host,
+				targetDS.Port,
+				targetDS.Username,
+				targetPwd,
+				group.targetDB,
+				charset,
+				collation,
+			)
+
+			if err != nil {
+				e.logService.Error(taskID, fmt.Sprintf("目标 %s 创建数据库 %s 失败: %v", targetDS.Name, group.targetDB, err))
+				return fmt.Errorf("创建数据库失败: %v", err)
+			}
+
+			if created {
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s 创建数据库: %s (字符集: %s, 排序规则: %s)", targetDS.Name, group.targetDB, charset, collation))
+			} else {
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s 数据库已存在: %s", targetDS.Name, group.targetDB))
+			}
 		}
 	}
 
@@ -144,7 +170,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 		e.logService.Info(taskID, "阶段1: 删除所有表")
 
 		for _, unitName := range unitNames {
-			if err := e.dropTable(ctx, taskID, unitName, &task, config, sourcePassword, targetPassword); err != nil {
+			if err := e.dropTable(ctx, taskID, unitName, &task, config, targetIDs); err != nil {
 				e.logService.Error(taskID, fmt.Sprintf("删除表 %s 失败: %v", unitName, err))
 				return fmt.Errorf("删除表失败: %v", err)
 			}
@@ -155,7 +181,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 
 		for i := len(unitNames) - 1; i >= 0; i-- {
 			unitName := unitNames[i]
-			if err := e.createTable(ctx, taskID, unitName, &task, config, sourcePassword, targetPassword); err != nil {
+			if err := e.createTable(ctx, taskID, unitName, &task, config, sourcePassword, targetIDs); err != nil {
 				e.logService.Error(taskID, fmt.Sprintf("创建表 %s 失败: %v", unitName, err))
 				return fmt.Errorf("创建表失败: %v", err)
 			}
@@ -184,6 +210,7 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 }
 
 // InitializeTable 初始化单个表（只处理表结构，不同步数据）
+// 支持多目标源和ALTER对比
 func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitName string,
 	task *models.SyncTask, config *TaskConfig, sourcePassword, targetPassword string) error {
 
@@ -210,62 +237,163 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitNam
 	}
 	defer reader.Close()
 
-	// 3. 创建Writer
-	writer, err := NewMySQLWriter(
-		task.TargetConn.Host,
-		task.TargetConn.Port,
-		task.TargetConn.Username,
-		targetPassword,
-		targetDB,
-		targetTable,
-	)
-	if err != nil {
-		return fmt.Errorf("创建Writer失败: %v", err)
-	}
-	defer writer.Close()
-
-	// 3.5 获取字段配置
+	// 获取字段配置
 	selectedFields := e.getSelectedFields(config, sourceDB, sourceTable)
 
-	// 4. 处理表存在策略
-	strategy := config.SyncConfig.TableExistsStrategy
-	switch strategy {
-	case "drop":
-		// 删除表
-		if err := writer.DropTable(); err != nil {
-			return fmt.Errorf("删除表失败: %v", err)
+	// 获取多目标源ID列表
+	targetIDs := config.TargetIDs
+	if len(targetIDs) == 0 {
+		// 兼容旧配置
+		targetIDs = []string{config.TargetID}
+	}
+
+	// 3. 对每个目标源进行初始化
+	for targetIdx, targetID := range targetIDs {
+		targetIdxStr := fmt.Sprintf("%d", targetIdx+1)
+
+		// 查询目标源
+		var targetDS models.DataSource
+		if err := database.DB.First(&targetDS, "id = ?", targetID).Error; err != nil {
+			return fmt.Errorf("查询目标源 %s 失败: %w", targetID, err)
 		}
 
-		// 创建表结构（支持字段过滤）
-		if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
-			return fmt.Errorf("创建表结构失败: %v", err)
-		}
-
-	case "truncate":
-		// 清空表
-		if err := writer.TruncateTable(); err != nil {
-			return fmt.Errorf("清空表失败: %v", err)
-		}
-
-	case "append":
-		// 检查表是否存在，不存在则创建
-		err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields)
+		targetPwd, err := e.dsService.crypto.Decrypt(targetDS.Password)
 		if err != nil {
-			// 表可能已存在，忽略错误
+			return fmt.Errorf("解密目标源 %s 密码失败: %w", targetID, err)
 		}
+
+		e.logService.Info(taskID, fmt.Sprintf("初始化目标 %s/%s: %s", targetIdxStr, len(targetIDs), targetDS.Name))
+
+		// 创建Writer
+		writer, err := NewMySQLWriter(
+			targetDS.Host,
+			targetDS.Port,
+			targetDS.Username,
+			targetPwd,
+			targetDB,
+			targetTable,
+		)
+		if err != nil {
+			return fmt.Errorf("目标 %s 创建Writer失败: %w", targetDS.Name, err)
+		}
+		defer writer.Close()
+
+		// 4. 处理表存在策略
+		strategy := config.SyncConfig.TableExistsStrategy
+
+		// 检查是否是"只同步表结构"模式
+		if config.SyncConfig.SyncStructureOnly {
+			// 使用ALTER对比逻辑
+			alterService := NewTableStructureAlterService()
+			alterResult, err := alterService.CompareAndAlter(
+				reader.GetDB(),
+				writer.GetDB(),
+				sourceTable,
+				targetTable,
+				selectedFields,
+			)
+			if err != nil {
+				return fmt.Errorf("目标 %s 表结构对比失败: %w", targetDS.Name, err)
+			}
+
+			switch alterResult.Action {
+			case "create":
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 不存在，创建表结构", targetDS.Name, unitName))
+				if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
+					return fmt.Errorf("目标 %s 创建表结构失败: %w", targetDS.Name, err)
+				}
+
+			case "update":
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 存在，对比结构差异", targetDS.Name, unitName))
+				if len(alterResult.SQLs) > 0 {
+					// 执行ALTER
+					alterSQL := "ALTER TABLE `" + targetTable + "` " + strings.Join(alterResult.SQLs, ", ")
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: 执行ALTER: %s", targetDS.Name, alterSQL))
+					if _, err := writer.GetDB().Exec(alterSQL); err != nil {
+						return fmt.Errorf("目标 %s 执行ALTER失败: %w", targetDS.Name, err)
+					}
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: ALTER完成", targetDS.Name))
+				} else {
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表结构无需修改", targetDS.Name))
+				}
+
+			case "skip":
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 结构一致，跳过", targetDS.Name, unitName))
+			}
+		} else {
+			// 原有逻辑：全量/增量同步
+			switch strategy {
+			case "drop":
+				// 删除表
+				if err := writer.DropTable(); err != nil {
+					return fmt.Errorf("目标 %s 删除表失败: %w", targetDS.Name, err)
+				}
+
+				// 创建表结构（支持字段过滤）
+				if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
+					return fmt.Errorf("目标 %s 创建表结构失败: %w", targetDS.Name, err)
+				}
+
+			case "truncate":
+				// 清空表
+				if err := writer.TruncateTable(); err != nil {
+					return fmt.Errorf("目标 %s 清空表失败: %w", targetDS.Name, err)
+				}
+
+			case "append":
+				// 使用ALTER对比逻辑
+				alterService := NewTableStructureAlterService()
+				alterResult, err := alterService.CompareAndAlter(
+					reader.GetDB(),
+					writer.GetDB(),
+					sourceTable,
+					targetTable,
+					selectedFields,
+				)
+				if err != nil {
+					return fmt.Errorf("目标 %s 表结构对比失败: %w", targetDS.Name, err)
+				}
+
+				switch alterResult.Action {
+				case "create":
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 不存在，创建表结构", targetDS.Name, unitName))
+					if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
+						return fmt.Errorf("目标 %s 创建表结构失败: %w", targetDS.Name, err)
+					}
+
+				case "update":
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 存在，对比结构差异", targetDS.Name, unitName))
+					if len(alterResult.SQLs) > 0 {
+						alterSQL := "ALTER TABLE `" + targetTable + "` " + strings.Join(alterResult.SQLs, ", ")
+						e.logService.Info(taskID, fmt.Sprintf("目标 %s: 执行ALTER: %s", targetDS.Name, alterSQL))
+						if _, err := writer.GetDB().Exec(alterSQL); err != nil {
+							return fmt.Errorf("目标 %s 执行ALTER失败: %w", targetDS.Name, err)
+						}
+					}
+
+				case "skip":
+					e.logService.Info(taskID, fmt.Sprintf("目标 %s: 表 %s 结构一致，跳过", targetDS.Name, unitName))
+				}
+			}
+		}
+
+		e.logService.Info(taskID, fmt.Sprintf("目标 %s 初始化完成: %s", targetDS.Name, unitName))
 	}
 
 	// 5. 更新总记录数到内存（为后续同步做准备）
-	totalRecords := reader.GetTotalCount()
-	progressManager.UpdateUnitProgress(taskID, unitName, totalRecords, 0)
+	// 只有在非"只同步表结构"模式下才更新记录数
+	if !config.SyncConfig.SyncStructureOnly {
+		totalRecords := reader.GetTotalCount()
+		progressManager.UpdateUnitProgress(taskID, unitName, totalRecords, 0)
+	}
 	progressManager.UpdateUnitStatus(taskID, unitName, "initialized")
 
 	return nil
 }
 
-// dropTable 只删除表（用于 drop 策略的第一阶段）
+// dropTable 只删除表（用于 drop 策略的第一阶段）- 支持多目标源
 func (e *SyncEngine) dropTable(ctx context.Context, taskID string, unitName string,
-	task *models.SyncTask, config *TaskConfig, sourcePassword, targetPassword string) error {
+	task *models.SyncTask, config *TaskConfig, targetIDs []string) error {
 
 	// 解析表名
 	_, _, targetDB, targetTable, err := e.parseUnitName(unitName, config)
@@ -273,31 +401,48 @@ func (e *SyncEngine) dropTable(ctx context.Context, taskID string, unitName stri
 		return fmt.Errorf("解析表名失败: %v", err)
 	}
 
-	// 创建Writer
-	writer, err := NewMySQLWriter(
-		task.TargetConn.Host,
-		task.TargetConn.Port,
-		task.TargetConn.Username,
-		targetPassword,
-		targetDB,
-		targetTable,
-	)
-	if err != nil {
-		return fmt.Errorf("创建Writer失败: %v", err)
-	}
-	defer writer.Close()
+	// 为每个目标源删除表
+	for _, targetID := range targetIDs {
+		// 查询目标源
+		var targetDS models.DataSource
+		if err := database.DB.First(&targetDS, "id = ?", targetID).Error; err != nil {
+			return fmt.Errorf("查询目标源 %s 失败: %w", targetID, err)
+		}
 
-	// 删除表
-	if err := writer.DropTable(); err != nil {
-		return fmt.Errorf("删除表失败: %v", err)
+		targetPwd, err := e.dsService.crypto.Decrypt(targetDS.Password)
+		if err != nil {
+			return fmt.Errorf("解密目标源 %s 密码失败: %w", targetID, err)
+		}
+
+		// 创建Writer
+		writer, err := NewMySQLWriter(
+			targetDS.Host,
+			targetDS.Port,
+			targetDS.Username,
+			targetPwd,
+			targetDB,
+			targetTable,
+		)
+		if err != nil {
+			return fmt.Errorf("目标 %s 创建Writer失败: %w", targetDS.Name, err)
+		}
+
+		// 删除表
+		if err := writer.DropTable(); err != nil {
+			writer.Close()
+			return fmt.Errorf("目标 %s 删除表失败: %w", targetDS.Name, err)
+		}
+		writer.Close()
+
+		e.logService.Info(taskID, fmt.Sprintf("目标 %s 删除表: %s.%s", targetDS.Name, targetDB, targetTable))
 	}
 
 	return nil
 }
 
-// createTable 只创建表（用于 drop 策略的第二阶段）
+// createTable 只创建表（用于 drop 策略的第二阶段）- 支持多目标源
 func (e *SyncEngine) createTable(ctx context.Context, taskID string, unitName string,
-	task *models.SyncTask, config *TaskConfig, sourcePassword, targetPassword string) error {
+	task *models.SyncTask, config *TaskConfig, sourcePassword string, targetIDs []string) error {
 
 	progressManager := GetProgressManager()
 
@@ -322,29 +467,46 @@ func (e *SyncEngine) createTable(ctx context.Context, taskID string, unitName st
 	}
 	defer reader.Close()
 
-	// 创建Writer
-	writer, err := NewMySQLWriter(
-		task.TargetConn.Host,
-		task.TargetConn.Port,
-		task.TargetConn.Username,
-		targetPassword,
-		targetDB,
-		targetTable,
-	)
-	if err != nil {
-		return fmt.Errorf("创建Writer失败: %v", err)
-	}
-	defer writer.Close()
-
 	// 获取字段配置
 	selectedFields := e.getSelectedFields(config, sourceDB, sourceTable)
 
-	// 创建表结构（支持字段过滤）
-	if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
-		return fmt.Errorf("创建表结构失败: %v", err)
+	// 为每个目标源创建表
+	for _, targetID := range targetIDs {
+		// 查询目标源
+		var targetDS models.DataSource
+		if err := database.DB.First(&targetDS, "id = ?", targetID).Error; err != nil {
+			return fmt.Errorf("查询目标源 %s 失败: %w", targetID, err)
+		}
+
+		targetPwd, err := e.dsService.crypto.Decrypt(targetDS.Password)
+		if err != nil {
+			return fmt.Errorf("解密目标源 %s 密码失败: %w", targetID, err)
+		}
+
+		// 创建Writer
+		writer, err := NewMySQLWriter(
+			targetDS.Host,
+			targetDS.Port,
+			targetDS.Username,
+			targetPwd,
+			targetDB,
+			targetTable,
+		)
+		if err != nil {
+			return fmt.Errorf("目标 %s 创建Writer失败: %w", targetDS.Name, err)
+		}
+
+		// 创建表结构（支持字段过滤）
+		if err := writer.CreateTableLikeWithFields(reader.GetDB(), sourceTable, selectedFields); err != nil {
+			writer.Close()
+			return fmt.Errorf("目标 %s 创建表结构失败: %w", targetDS.Name, err)
+		}
+		writer.Close()
+
+		e.logService.Info(taskID, fmt.Sprintf("目标 %s 创建表: %s.%s", targetDS.Name, targetDB, targetTable))
 	}
 
-	// 更新总记录数到内存（为后续同步做准备）
+	// 更新总记录数到内存（为后续同步做准备）- 只更新一次
 	totalRecords := reader.GetTotalCount()
 	progressManager.UpdateUnitProgress(taskID, unitName, totalRecords, 0)
 	progressManager.UpdateUnitStatus(taskID, unitName, "initialized")
