@@ -190,13 +190,15 @@
                     
                     <div class="progress-details mt-3">
                         ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
-                        ${this.renderProgressDetail('总体进度', (progress.overall_progress ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress || 0)}
-                        ${this.renderProgressDetail('表进度', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize', false)}
+                        ${this.renderProgressDetail('总体进度', (progress.overall_progress != null ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress != null ? progress.overall_progress : 0)}
+                        ${progress.init_tables != null ? this.renderProgressDetail('表初始化', `${progress.init_tables} / ${progress.total_tables || 0}`, currentStep === 'initialize', false) : ''}
+                        ${this.renderProgressDetail('表同步完成', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'sync_data', false)}
                         ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
                         ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
                         ${progress.elapsed_time ? this.renderProgressDetail('已用时间', progress.elapsed_time, false, false) : ''}
                         ${progress.estimated_time ? this.renderProgressDetail('预计剩余', progress.estimated_time, false, false) : ''}
                     </div>
+                    ${(progress.target_stats && progress.target_stats.length > 0) ? this.renderTargetStats(progress.target_stats) : ''}
                 `;
             }
         },
@@ -552,9 +554,48 @@
                 </div>
             `;
         },
-        
 
-        
+        // 渲染各目标数据源进度（紧凑表格，多目标不占满屏）
+        renderTargetStats: function(targetStats) {
+            if (!targetStats || targetStats.length === 0) return '';
+            const self = this;
+            return `
+                <div class="target-stats-section mt-3 pt-3 border-top">
+                    <h6 class="mb-2 text-secondary">各目标数据源进度</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0 target-stats-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:22%">目标</th>
+                                    <th style="width:10%">状态</th>
+                                    <th style="width:14%">初始化表</th>
+                                    <th style="width:14%">已同步</th>
+                                    <th style="width:20%">已处理记录</th>
+                                    <th style="width:20%">进度</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${targetStats.map(t => `
+                                    <tr>
+                                        <td class="text-truncate" title="${(t.target_name || t.target_id || '').replace(/"/g, '&quot;')}">${(t.target_name || t.target_id || '未知目标')}</td>
+                                        <td><span class="badge ${t.status === 'completed' ? 'bg-success' : (t.status === 'pending' ? 'bg-secondary' : 'bg-primary')}" style="font-size:0.7rem">${t.status === 'completed' ? '已完成' : (t.status === 'pending' ? '待开始' : '同步中')}</span></td>
+                                        <td>${t.init_tables != null ? t.init_tables : 0} / ${t.total_tables != null ? t.total_tables : 0}</td>
+                                        <td>${t.completed_tables != null ? t.completed_tables : 0} / ${t.total_tables != null ? t.total_tables : 0}</td>
+                                        <td>${self.formatNumber(t.processed_records || 0)} / ${self.formatNumber(t.total_records || 0)}</td>
+                                        <td>
+                                            <div class="progress flex-grow-1" style="height:6px;min-width:60px">
+                                                <div class="progress-bar" role="progressbar" style="width:${(t.progress != null ? t.progress : 0)}%"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        },
+
         // 更新日志 UI（替换所有日志）
         updateLogsUI: function(logs) {
             const container = document.getElementById('logContent');

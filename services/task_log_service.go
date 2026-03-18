@@ -218,3 +218,16 @@ func (s *TaskLogService) Warning(taskID string, message string) {
 func (s *TaskLogService) Success(taskID string, message string) {
 	s.AddLog(taskID, "success", message, "complete")
 }
+
+// Debug 记录调试日志到 sse.log 文件
+func (s *TaskLogService) Debug(taskID string, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureLogDir(taskID); err != nil {
+		return
+	}
+
+	logLine := fmt.Sprintf("[%s] [debug] %s", formatLogTime(time.Now()), message)
+	s.appendToFile(taskID, "sse", logLine)
+}

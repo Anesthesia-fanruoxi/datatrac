@@ -7,6 +7,7 @@ import (
 	"datatrace/models"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -236,119 +237,218 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unitName stri
 	}
 
 	// 检查是否为空表
-	if unit.TotalRecords == 0 {
+	// 优先使用 ApproxRows（初始化阶段预获取的近似行数），如果没有则使用 TotalRecords
+	approxRows := progressManager.GetApproxRows(taskID, unitName)
+	tableTotalRecords := unit.TotalRecords
+	if tableTotalRecords == 0 && approxRows > 0 {
+		// 使用近似行数作为预估
+		tableTotalRecords = approxRows
+		progressManager.UpdateUnitProgress(taskID, unitName, approxRows, 0)
+	}
+
+	if tableTotalRecords == 0 {
+		// 为每个目标发送 completed 消息，更新 TargetUnits 状态
+		for _, targetConn := range targetConns {
+			progressManager.SendProgress(ProgressMessage{
+				TaskID:       taskID,
+				TargetID:     targetConn.Conn.ID,
+				TargetName:   targetConn.Conn.Name,
+				UnitName:     unitName,
+				Status:       "completed",
+				TotalRecords: 0,
+				Processed:    0,
+				IsNew:        false,
+			})
+		}
 		progressManager.UpdateUnitStatus(taskID, unitName, "completed")
+		progressManager.UpdateUnitProgress(taskID, unitName, 0, 0)
 		completeMessage := fmt.Sprintf("表 %s 同步完成，共 0 条记录", unitName)
 		e.logService.AddLog(taskID, "success", completeMessage, "complete")
-		e.sseService.BroadcastProgressUpdate(taskID)
 		return nil
 	}
 
-	// 11. 对每个目标源进行同步
+	// 11. 并行同步到多个目标源
+	// 使用 WaitGroup 等待所有目标源完成
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(targetConns))
+
 	for targetIdx, targetConn := range targetConns {
-		e.logService.Info(taskID, fmt.Sprintf("同步到目标 %d/%d: %s", targetIdx+1, len(targetConns), targetConn.Conn.Name))
+		wg.Add(1)
+		go func(targetIdx int, targetConn TargetConnWithPassword) {
+			defer wg.Done()
 
-		// 初始化目标源单元进度
-		progressManager.InitTargetUnit(taskID, targetConn.Conn.ID, targetConn.Conn.Name, unitName, unit.TotalRecords)
-		progressManager.UpdateTargetUnitStatus(taskID, targetConn.Conn.ID, unitName, "running")
-
-		// 确保目标数据库存在
-		created, err := CreateDatabaseIfNotExists(
-			targetConn.Conn.Host,
-			targetConn.Conn.Port,
-			targetConn.Conn.Username,
-			targetConn.Password,
-			targetDB,
-			"utf8mb4",
-			"utf8mb4_general_ci",
-		)
-		if err != nil {
-			return e.failUnit(taskID, unitName, fmt.Sprintf("目标 %s 创建数据库失败: %v", targetConn.Conn.Name, err))
-		}
-		if created {
-			e.logService.Info(taskID, fmt.Sprintf("目标 %s 创建数据库: %s", targetConn.Conn.Name, targetDB))
-		}
-
-		// 创建Writer
-		writer, err := NewMySQLWriter(
-			targetConn.Conn.Host,
-			targetConn.Conn.Port,
-			targetConn.Conn.Username,
-			targetConn.Password,
-			targetDB,
-			targetTable,
-		)
-		if err != nil {
-			return e.failUnit(taskID, unitName, fmt.Sprintf("目标 %s 创建Writer失败: %v", targetConn.Conn.Name, err))
-		}
-
-		// 检查目标表是否存在，不存在则创建
-		if err := e.ensureTargetTableExists(writer.GetDB(), reader.GetDB(), sourceDB, sourceTable, targetTable, selectedFields, targetDB); err != nil {
-			writer.Close()
-			return e.failUnit(taskID, unitName, fmt.Sprintf("目标 %s 创建表结构失败: %v", targetConn.Conn.Name, err))
-		}
-
-		// 重新从头读取数据（每个目标源都需要从头读取）
-		reader.Reset()
-
-		// 批量读取和写入数据
-		batchNum := 0
-		// 当前目标源已处理的记录数（不累加到整体进度）
-		targetProcessed := int64(0)
-		for reader.HasMore() {
-			// 检查context是否被取消
-			select {
-			case <-ctx.Done():
-				writer.Close()
-				return e.pauseUnit(taskID, unitName, "任务被暂停")
-			default:
-			}
-
-			batchNum++
-
-			// 读取批次
-			records, err := reader.ReadBatch()
+			// 为每个目标源创建独立的 reader（MySQLReader 不是线程安全的）
+			targetReader, err := NewMySQLReaderWithFields(
+				task.SourceConn.Host,
+				task.SourceConn.Port,
+				task.SourceConn.Username,
+				sourcePassword,
+				sourceDB,
+				sourceTable,
+				batchSize,
+				selectedFields,
+			)
 			if err != nil {
-				writer.Close()
-				return e.failUnit(taskID, unitName, fmt.Sprintf("目标 %s 读取数据失败: %v", targetConn.Conn.Name, err))
+				errChan <- fmt.Errorf("目标 %s 创建Reader失败: %v", targetConn.Conn.Name, err)
+				return
+			}
+			defer targetReader.Close()
+
+			e.logService.Info(taskID, fmt.Sprintf("同步到目标 %d/%d: %s", targetIdx+1, len(targetConns), targetConn.Conn.Name))
+
+			// 发送初始化消息给 Process 线程
+			progressManager.SendProgress(ProgressMessage{
+				TaskID:       taskID,
+				TargetID:     targetConn.Conn.ID,
+				TargetName:   targetConn.Conn.Name,
+				UnitName:     unitName,
+				Status:       "initialized",
+				TotalRecords: tableTotalRecords,
+				Processed:    0,
+				IsNew:        true,
+			})
+
+			// 发送开始运行消息给 Process 线程
+			progressManager.SendProgress(ProgressMessage{
+				TaskID:       taskID,
+				TargetID:     targetConn.Conn.ID,
+				TargetName:   targetConn.Conn.Name,
+				UnitName:     unitName,
+				Status:       "running",
+				TotalRecords: tableTotalRecords,
+				Processed:    0,
+				IsNew:        false,
+			})
+
+			// 确保目标数据库存在
+			created, err := CreateDatabaseIfNotExists(
+				targetConn.Conn.Host,
+				targetConn.Conn.Port,
+				targetConn.Conn.Username,
+				targetConn.Password,
+				targetDB,
+				"utf8mb4",
+				"utf8mb4_general_ci",
+			)
+			if err != nil {
+				errChan <- fmt.Errorf("目标 %s 创建数据库失败: %v", targetConn.Conn.Name, err)
+				return
+			}
+			if created {
+				e.logService.Info(taskID, fmt.Sprintf("目标 %s 创建数据库: %s", targetConn.Conn.Name, targetDB))
 			}
 
-			if len(records) == 0 {
-				break
+			// 创建Writer
+			writer, err := NewMySQLWriter(
+				targetConn.Conn.Host,
+				targetConn.Conn.Port,
+				targetConn.Conn.Username,
+				targetConn.Password,
+				targetDB,
+				targetTable,
+			)
+			if err != nil {
+				errChan <- fmt.Errorf("目标 %s 创建Writer失败: %v", targetConn.Conn.Name, err)
+				return
 			}
 
-			// 写入批次
-			if err := writer.WriteBatch(records); err != nil {
+			// 检查目标表是否存在，不存在则创建
+			if err := e.ensureTargetTableExists(writer.GetDB(), targetReader.GetDB(), sourceDB, sourceTable, targetTable, selectedFields, targetDB); err != nil {
 				writer.Close()
-				// 根据错误策略处理
-				if config.SyncConfig.ErrorStrategy == "pause" {
-					return e.failUnit(taskID, unitName, fmt.Sprintf("目标 %s 写入数据失败: %v", targetConn.Conn.Name, err))
-				} else {
-					e.logService.Error(taskID, fmt.Sprintf("目标 %s 批次 %d 写入失败(跳过): %v", targetConn.Conn.Name, batchNum, err))
-					continue
+				errChan <- fmt.Errorf("目标 %s 创建表结构失败: %v", targetConn.Conn.Name, err)
+				return
+			}
+
+			// 批量读取和写入数据
+			batchNum := 0
+			// 当前目标源已处理的记录数（不累加到整体进度）
+			targetProcessed := int64(0)
+			for targetReader.HasMore() {
+				// 检查context是否被取消
+				select {
+				case <-ctx.Done():
+					writer.Close()
+					errChan <- fmt.Errorf("目标 %s 任务被暂停", targetConn.Conn.Name)
+					return
+				default:
 				}
+
+				batchNum++
+
+				// 读取批次
+				records, err := targetReader.ReadBatch()
+				if err != nil {
+					writer.Close()
+					errChan <- fmt.Errorf("目标 %s 读取数据失败: %v", targetConn.Conn.Name, err)
+					return
+				}
+
+				if len(records) == 0 {
+					break
+				}
+
+				// 写入批次
+				if err := writer.WriteBatch(records); err != nil {
+					writer.Close()
+					// 根据错误策略处理
+					if config.SyncConfig.ErrorStrategy == "pause" {
+						errChan <- fmt.Errorf("目标 %s 写入数据失败: %v", targetConn.Conn.Name, err)
+						return
+					} else {
+						e.logService.Error(taskID, fmt.Sprintf("目标 %s 批次 %d 写入失败(跳过): %v", targetConn.Conn.Name, batchNum, err))
+						continue
+					}
+				}
+
+				// 更新当前目标源的进度（临时变量，不累加到整体）
+				targetProcessed += int64(len(records))
+
+				// 发送进度消息给 Process 线程
+				progressManager.SendProgress(ProgressMessage{
+					TaskID:       taskID,
+					TargetID:     targetConn.Conn.ID,
+					TargetName:   targetConn.Conn.Name,
+					UnitName:     unitName,
+					Status:       "running",
+					TotalRecords: unit.TotalRecords,
+					Processed:    targetProcessed,
+					IsNew:        false,
+				})
+
+				// 生成同步批次日志
+				logMessage := fmt.Sprintf("目标 %s 表 %s 批次 %d: %d/%d (%.1f%%)",
+					targetConn.Conn.Name, unitName, batchNum, targetProcessed, unit.TotalRecords,
+					safePercent(targetProcessed, unit.TotalRecords))
+				e.logService.AddLog(taskID, "info", logMessage, "sync")
 			}
 
-			// 更新当前目标源的进度（临时变量，不累加到整体）
-			targetProcessed += int64(len(records))
+			writer.Close()
 
-			// 更新目标源级别进度
-			progressManager.UpdateTargetUnitProgress(taskID, targetConn.Conn.ID, unitName, targetProcessed, batchNum)
+			// 发送完成消息给 Process 线程
+			progressManager.SendProgress(ProgressMessage{
+				TaskID:       taskID,
+				TargetID:     targetConn.Conn.ID,
+				TargetName:   targetConn.Conn.Name,
+				UnitName:     unitName,
+				Status:       "completed",
+				TotalRecords: unit.TotalRecords,
+				Processed:    unit.TotalRecords,
+				IsNew:        false,
+			})
 
-			// 生成同步批次日志
-			logMessage := fmt.Sprintf("目标 %s 表 %s 批次 %d: %d/%d (%.1f%%)",
-				targetConn.Conn.Name, unitName, batchNum, targetProcessed, unit.TotalRecords,
-				safePercent(targetProcessed, unit.TotalRecords))
-			e.logService.AddLog(taskID, "info", logMessage, "sync")
+			e.logService.Info(taskID, fmt.Sprintf("目标 %s 同步完成: %s", targetConn.Conn.Name, unitName))
+		}(targetIdx, targetConn)
+	}
+
+	// 等待所有目标源完成
+	wg.Wait()
+	close(errChan)
+
+	// 检查是否有错误
+	for err := range errChan {
+		if err != nil {
+			return e.failUnit(taskID, unitName, err.Error())
 		}
-
-		writer.Close()
-
-		// 标记目标源单元完成
-		progressManager.UpdateTargetUnitStatus(taskID, targetConn.Conn.ID, unitName, "completed")
-		progressManager.UpdateTargetUnitProgress(taskID, targetConn.Conn.ID, unitName, unit.TotalRecords, batchNum)
-
-		e.logService.Info(taskID, fmt.Sprintf("目标 %s 同步完成: %s", targetConn.Conn.Name, unitName))
 	}
 
 	// 12. 标记为完成
@@ -357,7 +457,6 @@ func (e *SyncEngine) SyncTable(ctx context.Context, taskID string, unitName stri
 
 	completeMessage := fmt.Sprintf("表 %s 同步完成，共 %d 条记录（%d个目标）", unitName, unit.TotalRecords, len(targetConns))
 	e.logService.AddLog(taskID, "success", completeMessage, "complete")
-	e.sseService.BroadcastProgressUpdate(taskID)
 
 	return nil
 }

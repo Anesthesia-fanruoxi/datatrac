@@ -29,12 +29,11 @@
                 });
             }
 
-            // 管理凭据：打开弹框，不跳转
-            const btnManageCredential = document.getElementById('btnManageCredential');
-            if (btnManageCredential) {
-                btnManageCredential.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    DataSourceCore.openCredentialModal();
+            // 凭据表单提交（弹框内添加/编辑）
+            const credentialFormInModal = document.getElementById('credentialFormInModal');
+            if (credentialFormInModal) {
+                credentialFormInModal.addEventListener('submit', function(e) {
+                    DataSourceCore.saveCredentialForm(e);
                 });
             }
         },

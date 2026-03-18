@@ -3,6 +3,7 @@ package services
 import (
 	"datatrace/database"
 	"datatrace/models"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -22,14 +23,15 @@ type TaskProgress struct {
 	CurrentStep string `json:"current_step"`
 
 	// 全量同步进度（仅 sync_mode=full 时有值）
-	OverallProgress  *float64 `json:"overall_progress,omitempty"`
-	SyncSpeed        *int64   `json:"sync_speed,omitempty"`
-	ElapsedTime      *string  `json:"elapsed_time,omitempty"`
-	EstimatedTime    *string  `json:"estimated_time,omitempty"`
-	TotalTables      *int     `json:"total_tables,omitempty"`
-	CompletedTables  *int     `json:"completed_tables,omitempty"`
-	TotalRecords     *int64   `json:"total_records,omitempty"`
-	ProcessedRecords *int64   `json:"processed_records,omitempty"`
+	OverallProgress  *float64 `json:"overall_progress,omitempty"`  // 已处理记录/总记录，取2位小数
+	SyncSpeed        *int64   `json:"sync_speed,omitempty"`        // 每秒处理速度
+	ElapsedTime      *string  `json:"elapsed_time,omitempty"`      // 已运行时间
+	EstimatedTime    *string  `json:"estimated_time,omitempty"`    // 预计剩余时间
+	TotalTables      *int     `json:"total_tables,omitempty"`      // 总表数（固定，创建任务时选定）
+	InitTables       *int     `json:"init_tables,omitempty"`       // 已初始化表数（建表完成后更新）
+	CompletedTables  *int     `json:"completed_tables,omitempty"`  // 已完成表数（数据同步完成后更新）
+	TotalRecords     *int64   `json:"total_records,omitempty"`     // 总记录数（固定，获取元数据时统计）
+	ProcessedRecords *int64   `json:"processed_records,omitempty"` // 已处理记录数
 
 	// 全量同步目标源级别统计（仅 sync_mode=full 时有值）
 	TargetStats []*TargetProgress `json:"target_stats,omitempty"`
@@ -70,9 +72,6 @@ func (s *TaskProgressService) GetTaskProgress(taskID string, dbName string) (*Ta
 	} else {
 		// 全量同步模式：返回整体进度
 		s.fillFullSyncProgress(taskID, &task, progress)
-
-		// 全量同步模式：获取目标源级别统计
-		progress.TargetStats = progressManager.GetAllTargetStats(taskID)
 	}
 
 	return progress, nil
@@ -208,7 +207,7 @@ func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.S
 	taskData := progressManager.GetTask(taskID)
 
 	if taskData == nil {
-		// 任务未在运行，返回空进度
+		// 任务未在运行：从任务配置解析总表数，使初始状态显示 0/N
 		zero := 0
 		zeroInt64 := int64(0)
 		zeroFloat := 0.0
@@ -217,23 +216,63 @@ func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.S
 		progress.SyncSpeed = &zeroInt64
 		progress.ElapsedTime = &emptyStr
 		progress.EstimatedTime = &emptyStr
-		progress.TotalTables = &zero
 		progress.CompletedTables = &zero
+		progress.InitTables = &zero
 		progress.TotalRecords = &zeroInt64
 		progress.ProcessedRecords = &zeroInt64
+		totalFromConfig := countTotalTablesFromConfig(task)
+		progress.TotalTables = &totalFromConfig
 		return
 	}
 
-	// 统计各状态表数
-	total, completed, _, _, _, initialized := progressManager.GetTaskStats(taskID)
+	// 获取目标源级别统计
+	// 全量同步：总表数必须固定为“配置表数 × 目标数”，不能跟随 TargetUnits 动态增长。
+	// 这里优先使用 Redis 配置（带降级），避免 DB 中 task.Config 与运行时配置不一致导致 target_stats 总表数异常。
+	cfg, _ := NewConfigCacheService().GetTaskConfigWithFallback(taskID)
+	baseTargetStats := s.buildTargetStatsFromTaskConfig(cfg)
+	runtimeTargetStats := progressManager.GetAllTargetStats(taskID)
+	targetStats := mergeFullSyncTargetStats(baseTargetStats, runtimeTargetStats)
 
-	// 如果当前是初始化阶段，使用initializedCount作为completedCount
-	if task.CurrentStep == "initialize" {
-		completed = initialized
+	// 汇总所有目标的表数、记录数作为总体进度
+	total := countTotalTablesFromTaskConfig(cfg)
+	completed := 0
+	initCompleted := 0
+	var totalRecords, processedRecords int64
+	isFullSync := task.SyncMode == "full"
+
+	// 注释掉源端统计获取，改为使用目标端累加
+	// _, completedSrc, _, _, _, _ := progressManager.GetTaskStats(taskID)
+
+	for _, ts := range targetStats {
+		initCompleted += ts.InitTables
+		completed += ts.CompletedTables // 累加各目标的完成表数
+		totalRecords += ts.TotalRecords
+		processedRecords += ts.ProcessedRecords
+		// 全量模式不返回单表详情，只返回整体进度
+		if isFullSync {
+			ts.Tables = nil
+		}
 	}
 
-	// 获取总体进度
-	totalRecords, processedRecords := progressManager.GetTotalProgress(taskID)
+	// init_tables 从源端 Units 的 initialized 状态统计
+	if isFullSync {
+		// 初始化阶段：用 Units 的 initialized 状态折算（×目标数）
+		// 同步数据阶段：init_tables 表示“结构已初始化完成的表”，不应因为单位状态变成 running/completed 而回退，直接固定为 total
+		if task.CurrentStep == "initialize" {
+			_, _, _, _, _, initialized := progressManager.GetTaskStats(taskID)
+			targets := countTargetsFromTaskConfig(cfg)
+			initCompleted = initialized * targets
+			if initCompleted > total {
+				initCompleted = total
+			}
+		} else {
+			initCompleted = total // 同步数据阶段：init_tables 直接固定为总量（结构已在初始化阶段完成）
+		}
+		// 如果还在初始化阶段，completed 还未产生，设为 0
+		if task.CurrentStep == "initialize" {
+			completed = 0
+		}
+	}
 
 	// 计算总体进度（基于记录数）
 	overallProgress := 0.0
@@ -269,9 +308,248 @@ func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.S
 	progress.ElapsedTime = &elapsedTime
 	progress.EstimatedTime = &estimatedTime
 	progress.TotalTables = &total
+	progress.InitTables = &initCompleted
+	// 全量同步：completed_tables 使用目标端累加统计（各目标完成表数之和）
 	progress.CompletedTables = &completed
 	progress.TotalRecords = &totalRecords
 	progress.ProcessedRecords = &processedRecords
+	// 修正 target_stats 的口径：根据当前阶段决定 init_tables 逻辑
+	targetStats = fixFullSyncTargetStats(targetStats, total, task.CurrentStep)
+	progress.TargetStats = targetStats
+}
+
+// fixFullSyncTargetStats 修正全量同步的 target_stats 口径：
+// - init_tables: 初始化阶段保持运行时统计，同步阶段固定为 TotalTables
+// - completed_tables: 应为"该目标已完成同步的表数"，从运行时统计获取
+func fixFullSyncTargetStats(stats []*TargetProgress, totalSrcTables int, currentStep string) []*TargetProgress {
+	if len(stats) == 0 {
+		return stats
+	}
+	for _, s := range stats {
+		if s == nil {
+			continue
+		}
+		// init_tables: 根据当前阶段决定逻辑
+		if currentStep != "initialize" {
+			// 同步数据阶段：固定为总量（初始化已完成）
+			s.InitTables = s.TotalTables
+		} else {
+			// 初始化阶段：不显示单个数据源的 init_tables，设为 0
+			s.InitTables = 0
+		}
+		// completed_tables 保持运行时统计（已完成同步的表数）
+	}
+	return stats
+}
+
+// countTotalTablesFromConfig 从任务配置中统计总表数（用于未运行时展示 0/N）
+// 返回值为：源端选中表数 × 目标数（每个目标都会同步这些表）
+func countTotalTablesFromConfig(task *models.SyncTask) int {
+	if task == nil || task.Config == "" {
+		return 0
+	}
+	var cfg TaskConfig
+	if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+		return 0
+	}
+	n := 0
+	for _, db := range cfg.SelectedDatabases {
+		n += len(db.Tables)
+	}
+	targets := len(cfg.TargetIDs)
+	if targets == 0 && cfg.TargetID != "" {
+		targets = 1
+	}
+	if targets == 0 {
+		targets = 1
+	}
+	return n * targets
+}
+
+// countTargetsFromConfig 统计目标源数量（用于多目标源折算）
+func countTargetsFromConfig(task *models.SyncTask) int {
+	if task == nil || task.Config == "" {
+		return 1
+	}
+	var cfg TaskConfig
+	if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+		return 1
+	}
+	targets := len(cfg.TargetIDs)
+	if targets == 0 && cfg.TargetID != "" {
+		targets = 1
+	}
+	if targets <= 0 {
+		targets = 1
+	}
+	return targets
+}
+
+func countTotalTablesFromTaskConfig(cfg *TaskConfig) int {
+	if cfg == nil {
+		return 0
+	}
+	n := 0
+	for _, db := range cfg.SelectedDatabases {
+		n += len(db.Tables)
+	}
+	return n * countTargetsFromTaskConfig(cfg)
+}
+
+func countTargetsFromTaskConfig(cfg *TaskConfig) int {
+	if cfg == nil {
+		return 1
+	}
+	targets := len(cfg.TargetIDs)
+	if targets == 0 && cfg.TargetID != "" {
+		targets = 1
+	}
+	if targets <= 0 {
+		targets = 1
+	}
+	return targets
+}
+
+func (s *TaskProgressService) buildTargetStatsFromTaskConfig(cfg *TaskConfig) []*TargetProgress {
+	if cfg == nil {
+		return nil
+	}
+	targetIDs := cfg.TargetIDs
+	if len(targetIDs) == 0 && cfg.TargetID != "" {
+		targetIDs = []string{cfg.TargetID}
+	}
+	if len(targetIDs) == 0 {
+		return nil
+	}
+	n := 0
+	for _, db := range cfg.SelectedDatabases {
+		n += len(db.Tables)
+	}
+	if n < 0 {
+		n = 0
+	}
+	dsService := NewDataSourceService()
+	list := make([]*TargetProgress, 0, len(targetIDs))
+	for _, id := range targetIDs {
+		name := id
+		if ds, err := dsService.GetByID(id); err == nil && ds != nil {
+			name = ds.Name
+		}
+		list = append(list, &TargetProgress{
+			TargetID:         id,
+			TargetName:       name,
+			Status:           "pending",
+			Progress:         0,
+			TotalTables:      n, // 每个目标都需要同步 n 张表
+			InitTables:       0,
+			CompletedTables:  0,
+			TotalRecords:     0,
+			ProcessedRecords: 0,
+		})
+	}
+	return list
+}
+
+// mergeFullSyncTargetStats 将运行时统计合并到配置占位统计中（固定 TotalTables，不随 TargetUnits 动态增长）
+func mergeFullSyncTargetStats(base []*TargetProgress, runtime []*TargetProgress) []*TargetProgress {
+	if len(base) == 0 && len(runtime) == 0 {
+		return nil
+	}
+	if len(base) == 0 {
+		// 没有配置占位时（极端情况），直接返回运行时
+		return runtime
+	}
+
+	// target_id -> stat
+	rt := make(map[string]*TargetProgress, len(runtime))
+	for _, s := range runtime {
+		if s == nil || s.TargetID == "" {
+			continue
+		}
+		rt[s.TargetID] = s
+	}
+
+	out := make([]*TargetProgress, 0, len(base))
+	for _, b := range base {
+		if b == nil {
+			continue
+		}
+		if r, ok := rt[b.TargetID]; ok && r != nil {
+			// 固定 b.TotalTables，其余用运行时数据覆盖
+			// Progress 改为按表完成度计算（而非按数据量，避免跳动）
+			merged := *b
+			merged.Status = r.Status
+			if r.TotalTables > 0 {
+				merged.Progress = float64(r.CompletedTables) / float64(r.TotalTables) * 100
+			} else {
+				merged.Progress = 0
+			}
+			merged.InitTables = r.InitTables
+			merged.CompletedTables = r.CompletedTables
+			merged.TotalRecords = r.TotalRecords
+			merged.ProcessedRecords = r.ProcessedRecords
+			merged.Tables = r.Tables
+			out = append(out, &merged)
+		} else {
+			out = append(out, b)
+		}
+	}
+
+	// 运行时出现但配置没有的目标（理论上不应该），追加在末尾
+	for id, r := range rt {
+		found := false
+		for _, b := range base {
+			if b != nil && b.TargetID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, r)
+		}
+	}
+
+	return out
+}
+
+// buildTargetStatsFromConfig 任务未运行时，从配置构建各目标数据源占位进度（每个目标 0/N 表、0 记录）
+func (s *TaskProgressService) buildTargetStatsFromConfig(task *models.SyncTask) []*TargetProgress {
+	if task == nil || task.Config == "" {
+		return nil
+	}
+	var cfg TaskConfig
+	if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+		return nil
+	}
+	targetIDs := cfg.TargetIDs
+	if len(targetIDs) == 0 && cfg.TargetID != "" {
+		targetIDs = []string{cfg.TargetID}
+	}
+	if len(targetIDs) == 0 {
+		return nil
+	}
+	totalUnits := countTotalTablesFromConfig(task)
+	tablesPerTarget := totalUnits / len(targetIDs)
+	dsService := NewDataSourceService()
+	list := make([]*TargetProgress, 0, len(targetIDs))
+	for _, id := range targetIDs {
+		name := id
+		if ds, err := dsService.GetByID(id); err == nil && ds != nil {
+			name = ds.Name
+		}
+		list = append(list, &TargetProgress{
+			TargetID:         id,
+			TargetName:       name,
+			Status:           "pending",
+			Progress:         0,
+			TotalTables:      tablesPerTarget,
+			InitTables:       0,
+			CompletedTables:  0,
+			TotalRecords:     0,
+			ProcessedRecords: 0,
+		})
+	}
+	return list
 }
 
 // formatDuration 格式化时间间隔为 HH:MM:SS

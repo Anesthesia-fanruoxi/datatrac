@@ -11,13 +11,14 @@ import (
 
 // TestConnectionRequest 测试连接请求
 type TestConnectionRequest struct {
-	Type         string `json:"type" binding:"required"`
-	Host         string `json:"host" binding:"required"`
-	Port         int    `json:"port" binding:"required"`
-	Username     string `json:"username" binding:"required"`
-	Password     string `json:"password" binding:"required"`
-	DatabaseName string `json:"database_name"`
-	UseSSL       bool   `json:"use_ssl"` // 是否使用SSL/HTTPS
+	Type         string  `json:"type" binding:"required"`
+	Host         string  `json:"host" binding:"required"`
+	Port         int     `json:"port" binding:"required"`
+	Username     string  `json:"username"`      // 手动输入时必填
+	Password     string  `json:"password"`      // 手动输入时必填
+	CredentialID *string `json:"credential_id"` // 使用凭据时传此字段，与 username/password 二选一
+	DatabaseName string  `json:"database_name"`
+	UseSSL       bool    `json:"use_ssl"` // 是否使用SSL/HTTPS
 }
 
 // TestConnectionResponse 测试连接响应
@@ -29,6 +30,23 @@ type TestConnectionResponse struct {
 
 // TestConnection 测试数据源连接
 func (s *DataSourceService) TestConnection(req *TestConnectionRequest) (*TestConnectionResponse, error) {
+	// 若使用凭据，先解析出 username/password
+	if req.CredentialID != nil && *req.CredentialID != "" {
+		credService := NewCredentialService()
+		credential, err := credService.GetByID(*req.CredentialID)
+		if err != nil {
+			return &TestConnectionResponse{Success: false, Message: "凭据不存在"}, nil
+		}
+		password, err := credService.GetDecryptedPassword(*req.CredentialID)
+		if err != nil {
+			return &TestConnectionResponse{Success: false, Message: "凭据密码解密失败"}, nil
+		}
+		req.Username = credential.Username
+		req.Password = password
+	}
+	if req.Username == "" || req.Password == "" {
+		return &TestConnectionResponse{Success: false, Message: "请选择凭据或填写用户名和密码"}, nil
+	}
 	switch req.Type {
 	case "mysql":
 		return s.testMySQLConnection(req)

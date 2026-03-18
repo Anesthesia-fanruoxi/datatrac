@@ -17,9 +17,11 @@
                 
                 const tasks = result.data || [];
                 const configuredTasks = tasks.filter(t => t.status === 'configured' || t.is_running);
+                const structureTasks = configuredTasks.filter(t => t.sync_mode === 'structure');
                 const fullTasks = configuredTasks.filter(t => t.sync_mode === 'full');
                 const incrementalTasks = configuredTasks.filter(t => t.sync_mode === 'incremental');
                 
+                this.render('structureTaskList', structureTasks);
                 this.render('fullTaskList', fullTasks);
                 this.render('incrementalTaskList', incrementalTasks);
                 

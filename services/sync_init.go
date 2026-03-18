@@ -22,6 +22,10 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 		Update("current_step", "initialize")
 	progressManager.UpdateTaskStep(taskID, "initialize")
 
+	// 初始化阶段也推送 SSE，便于前端展示进度并创建 sse 日志文件
+	sseService := NewTaskSSEService()
+	sseService.BroadcastProgressUpdate(taskID)
+
 	// 1. 查询任务配置
 	var task models.SyncTask
 	if err := database.DB.Preload("SourceConn").Preload("TargetConn").First(&task, "id = ?", taskID).Error; err != nil {
@@ -159,7 +163,13 @@ func (e *SyncEngine) InitializeWorker(ctx context.Context, taskID string, unitNa
 		}
 	}
 
-	// 6. 按顺序初始化所有表
+	// 6. 初始化阶段：获取源表近似行数
+	e.logService.Info(taskID, "获取源表数据量...")
+	if err := e.fetchSourceTableRows(ctx, taskID, &task, config, sourcePassword); err != nil {
+		e.logService.Warning(taskID, fmt.Sprintf("获取源表数据量失败: %v，将使用实际同步量统计", err))
+	}
+
+	// 7. 按顺序初始化所有表
 	e.logService.Info(taskID, fmt.Sprintf("开始初始化 %d 个表的结构", len(unitNames)))
 
 	strategy := config.SyncConfig.TableExistsStrategy
@@ -388,6 +398,14 @@ func (e *SyncEngine) InitializeTable(ctx context.Context, taskID string, unitNam
 	}
 	progressManager.UpdateUnitStatus(taskID, unitName, "initialized")
 
+	// 同时更新所有目标端的状态
+	for _, targetID := range targetIDs {
+		progressManager.UpdateTargetUnitStatus(taskID, targetID, unitName, "initialized")
+	}
+
+	// 每张表初始化后推送 SSE，便于前端与 sse 日志看到初始化进度
+	NewTaskSSEService().BroadcastProgressUpdate(taskID)
+
 	return nil
 }
 
@@ -510,6 +528,107 @@ func (e *SyncEngine) createTable(ctx context.Context, taskID string, unitName st
 	totalRecords := reader.GetTotalCount()
 	progressManager.UpdateUnitProgress(taskID, unitName, totalRecords, 0)
 	progressManager.UpdateUnitStatus(taskID, unitName, "initialized")
+
+	// 同时更新所有目标端的状态
+	for _, targetID := range targetIDs {
+		progressManager.UpdateTargetUnitStatus(taskID, targetID, unitName, "initialized")
+	}
+
+	// 每张表初始化后推送 SSE（drop 策略创建表阶段）
+	NewTaskSSEService().BroadcastProgressUpdate(taskID)
+
+	return nil
+}
+
+// fetchSourceTableRows 获取源表近似行数（从 SHOW TABLE STATUS）
+func (e *SyncEngine) fetchSourceTableRows(ctx context.Context, taskID string, task *models.SyncTask, config *TaskConfig, sourcePassword string) error {
+	progressManager := GetProgressManager()
+
+	// 构建 targetDB.targetTable -> (sourceDB, sourceTable) 的映射
+	tableMapping := make(map[string][2]string) // key: targetDB.targetTable, value: [0]=sourceDB, [1]=sourceTable
+
+	for _, db := range config.SelectedDatabases {
+		sourceDB := db.SourceDatabase
+		if sourceDB == "" {
+			sourceDB = db.Database
+		}
+		for _, tbl := range db.Tables {
+			key := db.Database + "." + tbl.TargetTable
+			tableMapping[key] = [2]string{sourceDB, tbl.SourceTable}
+		}
+	}
+
+	// 按源数据库分组
+	sourceDBs := make(map[string][]string) // sourceDB -> list of targetTable
+
+	for key, mapping := range tableMapping {
+		sourceDB := mapping[0]
+		sourceDBs[sourceDB] = append(sourceDBs[sourceDB], key)
+	}
+
+	// 连接每个源数据库并获取表状态
+	for dbName, tables := range sourceDBs {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("获取源表数据量被取消")
+		default:
+		}
+
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s",
+			task.SourceConn.Username, sourcePassword, task.SourceConn.Host, task.SourceConn.Port, dbName)
+
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return fmt.Errorf("连接源数据库 %s 失败: %w", dbName, err)
+		}
+		defer db.Close()
+
+		// 执行 SHOW TABLE STATUS
+		rows, err := db.Query("SHOW TABLE STATUS")
+		if err != nil {
+			return fmt.Errorf("获取表状态失败: %w", err)
+		}
+		defer rows.Close()
+
+		// 创建需要过滤的表集合
+		neededTables := make(map[string]bool)
+		for _, t := range tables {
+			mapping := tableMapping[t]
+			neededTables[mapping[1]] = true // 使用源表名
+		}
+
+		for rows.Next() {
+			var name sql.NullString
+			var rowsCount sql.NullInt64
+			// 只关心 Name 和 Rows 字段
+			err := rows.Scan(&name, &rowsCount)
+			if err != nil {
+				continue
+			}
+			if name.Valid {
+				tableName := name.String
+				// 只处理配置的表
+				if !neededTables[tableName] {
+					continue
+				}
+
+				approxRows := int64(0)
+				if rowsCount.Valid {
+					approxRows = rowsCount.Int64
+				}
+
+				// 找到对应的 targetDB.targetTable
+				for targetKey, mapping := range tableMapping {
+					if mapping[1] == tableName && mapping[0] == dbName {
+						// 存储到进度管理器（使用 targetDB.targetTable 格式）
+						progressManager.SetApproxRows(taskID, targetKey, approxRows)
+						break
+					}
+				}
+			}
+		}
+		rows.Close()
+	}
 
 	return nil
 }

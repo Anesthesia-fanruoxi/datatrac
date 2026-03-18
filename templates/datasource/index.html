@@ -122,20 +122,30 @@
 
                 <div class="mb-3">
                     <label class="form-label">认证方式 <span class="text-danger">*</span></label>
-                    <select class="form-select" id="authType" onchange="DataSourceCore.toggleAuthType()">
-                        <option value="manual">手动输入</option>
-                        <option value="credential">使用凭据</option>
-                    </select>
+                    <div class="btn-group w-100" role="group" aria-label="认证方式">
+                        <input type="radio" class="btn-check" name="authType" id="authTypeManual" value="manual" autocomplete="off" checked onchange="DataSourceCore.toggleAuthType()">
+                        <label class="btn btn-outline-primary" for="authTypeManual">
+                            <i class="bi bi-person me-1"></i>手动输入
+                        </label>
+                        <input type="radio" class="btn-check" name="authType" id="authTypeCredential" value="credential" autocomplete="off" onchange="DataSourceCore.toggleAuthType()">
+                        <label class="btn btn-outline-primary" for="authTypeCredential">
+                            <i class="bi bi-key me-1"></i>使用凭据
+                        </label>
+                    </div>
                 </div>
 
                 <div id="credentialGroup" style="display:none;">
                     <div class="mb-3">
                         <label class="form-label">选择凭据 <span class="text-danger">*</span></label>
-                        <select class="form-select" id="dsCredential">
-                            <option value="">请选择凭据</option>
-                        </select>
-                        <div class="form-text">
-                            <a href="#" id="btnManageCredential">管理凭据</a>
+                        <div class="input-group has-validation">
+                            <span class="input-group-text bg-light">
+                                <i class="bi bi-key text-secondary"></i>
+                            </span>
+                            <input type="text" class="form-control" id="dsCredentialName" readonly placeholder="点击右侧按钮选择凭据">
+                            <input type="hidden" id="dsCredential">
+                            <button type="button" class="btn btn-primary" onclick="DataSourceCore.showCredentialSelector()">
+                                <i class="bi bi-list-ul me-1"></i>选择
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -172,27 +182,77 @@
     </div>
 </div>
 
-<!-- 管理凭据弹框 -->
-<div id="credentialManageModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1001; backdrop-filter: blur(5px); align-items:center; justify-content:center;" onclick="if(event.target===this) DataSourceCore.closeCredentialModal()">
-    <div class="modal-content bg-white rounded-3 shadow" style="max-width: 400px; margin: auto;">
-        <div class="modal-header">
-            <h5 class="modal-title">管理凭据</h5>
-            <button type="button" class="btn-close" aria-label="关闭" onclick="DataSourceCore.closeCredentialModal()"></button>
-        </div>
-        <div class="modal-body">
-            <p class="text-secondary small">如需添加或修改凭据，可在新窗口中操作，然后点击「刷新凭据列表」更新下拉选项。</p>
-            <div class="d-flex flex-column gap-2 mt-2">
-                <button type="button" class="btn btn-outline-primary" onclick="DataSourceCore.openCredentialsInNewWindow()">
-                    <i class="bi bi-box-arrow-up-right"></i> 在新窗口打开凭据管理
+<!-- 选择凭据弹框 -->
+<div id="credentialSelectModal" class="credential-select-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; backdrop-filter: blur(6px); align-items:center; justify-content:center;" onclick="if(event.target===this) DataSourceCore.closeCredentialSelectModal()">
+    <div class="credential-select-dialog bg-white rounded-4 shadow" style="width: 640px; max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="credential-select-header">
+            <h5 class="mb-0 text-white d-flex align-items-center">
+                <i class="bi bi-key-fill me-2 opacity-90"></i>选择凭据
+            </h5>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-light btn-sm px-3" onclick="DataSourceCore.showAddCredentialForm()">
+                    <i class="bi bi-plus-lg me-1"></i>新建凭据
                 </button>
-                <button type="button" class="btn btn-primary" onclick="DataSourceCore.refreshCredentialsAndClose()">
-                    <i class="bi bi-arrow-clockwise"></i> 刷新凭据列表
+                <button type="button" class="btn btn-link btn-sm p-0 text-white opacity-75 hover-opacity-100" style="min-width: 32px;" aria-label="关闭" onclick="DataSourceCore.closeCredentialSelectModal()">
+                    <i class="bi bi-x-lg"></i>
                 </button>
             </div>
         </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="DataSourceCore.closeCredentialModal()">关闭</button>
+        <div class="credential-select-body overflow-auto flex-grow-1" style="min-height: 260px;">
+            <table class="credential-select-table mb-0">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>用户名</th>
+                        <th>描述</th>
+                        <th class="text-end" style="width: 180px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="credentialSelectList">
+                    <tr><td colspan="4" class="text-center text-muted py-5">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        加载中...
+                    </td></tr>
+                </tbody>
+            </table>
         </div>
+        <div class="credential-select-footer d-flex justify-content-end px-3 py-3">
+            <button type="button" class="btn btn-outline-secondary" onclick="DataSourceCore.closeCredentialSelectModal()">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 凭据表单弹框（添加/编辑） -->
+<div id="credentialFormModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1002; align-items:center; justify-content:center; backdrop-filter: blur(3px);" onclick="if(event.target===this) DataSourceCore.closeCredentialFormModal()">
+    <div class="bg-white rounded-4 shadow-lg" style="width: 500px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 18px 24px; border-radius: 1rem 1rem 0 0;">
+            <h6 class="mb-0 text-white" id="credentialFormModalTitle"><i class="bi bi-key me-2"></i>新建凭据</h6>
+        </div>
+        <form id="credentialFormInModal">
+            <input type="hidden" id="credentialFormId" value="">
+            <div class="p-4">
+                <div class="mb-3">
+                    <label class="form-label">名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="credFormName" required placeholder="例如: 测试环境凭据">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="credFormUsername" required placeholder="数据库用户名">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">密码 <span class="text-danger" id="credFormPasswordRequired">*</span></label>
+                    <input type="password" class="form-control" id="credFormPassword" placeholder="编辑时留空不修改">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">描述</label>
+                    <textarea class="form-control" id="credFormDescription" rows="2" placeholder="可选，描述此凭据的用途"></textarea>
+                </div>
+            </div>
+            <div class="px-4 pb-4 d-flex justify-content-end gap-2">
+                <button type="button" class="btn btn-secondary" onclick="DataSourceCore.closeCredentialFormModal()">取消</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle me-1"></i>保存</button>
+            </div>
+        </form>
     </div>
 </div>
 

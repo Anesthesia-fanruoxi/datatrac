@@ -42,12 +42,16 @@ func (s *TaskControlService) StartTask(taskID string) error {
 	}
 
 	// 3. 根据同步模式选择执行路径
-	if task.SyncMode == "incremental" {
+	switch task.SyncMode {
+	case "incremental":
 		return s.startIncrementalTask(taskID)
+	case "structure":
+		// 结构同步：对比两边表结构，使用 ALTER 增删改（功能开发中）
+		return fmt.Errorf("结构同步功能开发中，敬请期待")
+	default:
+		// 全量同步
+		return s.startFullSyncTask(taskID)
 	}
-
-	// 默认执行全量同步
-	return s.startFullSyncTask(taskID)
 }
 
 // PauseTask 暂停任务

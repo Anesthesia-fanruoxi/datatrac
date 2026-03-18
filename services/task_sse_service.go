@@ -334,6 +334,9 @@ func (s *TaskSSEService) BroadcastProgressUpdate(taskID string) {
 				return
 			}
 
+			progressJSON, _ := json.Marshal(progress)
+			s.logService.Debug(taskID, fmt.Sprintf("SSE发送进度: %s", progressJSON))
+
 			select {
 			case c <- SSEMessage{
 				Event: "progress",

@@ -28,3 +28,96 @@
 .status-error {
     color: #dc3545;
 }
+
+/* ========== 选择凭据弹框 ========== */
+.credential-select-modal {
+    padding: 1rem;
+}
+
+.credential-select-dialog {
+    border: none;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.credential-select-header {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.credential-select-header .btn-light {
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.credential-select-body {
+    background: #fafafa;
+}
+
+/* 凭据选择表格：不用 .table 类，避免全局表头渐变；表头无底色 */
+.credential-select-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.credential-select-table thead th {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #475569;
+    text-transform: none;
+    background: #fff;
+    border: none;
+    border-bottom: 2px solid #e2e8f0;
+    border-radius: 0;
+    padding: 0.75rem 1rem;
+}
+
+.credential-select-table tbody td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+    background: #fff;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.credential-select-table tbody tr:hover td {
+    background: #f8fafc;
+}
+
+.credential-select-table .credential-actions {
+    display: inline-flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+}
+
+.credential-select-table .credential-actions .btn {
+    font-size: 0.8125rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    line-height: 1;
+}
+
+.credential-select-table .credential-actions .btn-primary {
+    background: #6366f1;
+    border-color: #6366f1;
+}
+
+.credential-select-table .credential-actions .btn-primary:hover {
+    background: #4f46e5;
+    border-color: #4f46e5;
+}
+
+.credential-select-footer {
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+}
+
+.credential-select-footer .btn {
+    border-radius: 8px;
+    min-width: 72px;
+}
+
+.hover-opacity-100:hover {
+    opacity: 1 !important;
+}

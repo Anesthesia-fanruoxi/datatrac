@@ -607,3 +607,21 @@
     border: none;
     padding: 0;
 }
+
+/* 各目标数据源进度：紧凑表格，避免多目标占满屏 */
+.target-stats-section .target-stats-table {
+    font-size: 0.8125rem;
+}
+.target-stats-section .target-stats-table thead th {
+    background: #f1f5f9 !important;
+    color: #475569;
+    font-weight: 600;
+    border: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0.4rem 0.5rem;
+    border-radius: 0;
+}
+.target-stats-section .target-stats-table tbody td {
+    padding: 0.4rem 0.5rem;
+    vertical-align: middle;
+}
