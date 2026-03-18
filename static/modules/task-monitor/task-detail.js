@@ -191,6 +191,7 @@
                     <div class="progress-details mt-3">
                         ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
                         ${this.renderProgressDetail('总体进度', (progress.overall_progress != null ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress != null ? progress.overall_progress : 0)}
+                        ${progress.init_tables !== undefined ? this.renderProgressDetail('表初始化完成', `${progress.init_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'initialize', false) : ''}
                         ${this.renderProgressDetail('表同步完成', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'sync_data', false)}
                         ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
                         ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
