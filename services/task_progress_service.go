@@ -244,7 +244,6 @@ func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.S
 	// _, completedSrc, _, _, _, _ := progressManager.GetTaskStats(taskID)
 
 	for _, ts := range targetStats {
-		initCompleted += ts.InitTables
 		completed += ts.CompletedTables // 累加各目标的完成表数
 		totalRecords += ts.TotalRecords
 		processedRecords += ts.ProcessedRecords
@@ -319,7 +318,6 @@ func (s *TaskProgressService) fillFullSyncProgress(taskID string, task *models.S
 }
 
 // fixFullSyncTargetStats 修正全量同步的 target_stats 口径：
-// - init_tables: 初始化阶段保持运行时统计，同步阶段固定为 TotalTables
 // - completed_tables: 应为"该目标已完成同步的表数"，从运行时统计获取
 func fixFullSyncTargetStats(stats []*TargetProgress, totalSrcTables int, currentStep string) []*TargetProgress {
 	if len(stats) == 0 {
@@ -328,14 +326,6 @@ func fixFullSyncTargetStats(stats []*TargetProgress, totalSrcTables int, current
 	for _, s := range stats {
 		if s == nil {
 			continue
-		}
-		// init_tables: 根据当前阶段决定逻辑
-		if currentStep != "initialize" {
-			// 同步数据阶段：固定为总量（初始化已完成）
-			s.InitTables = s.TotalTables
-		} else {
-			// 初始化阶段：不显示单个数据源的 init_tables，设为 0
-			s.InitTables = 0
 		}
 		// completed_tables 保持运行时统计（已完成同步的表数）
 	}
@@ -441,7 +431,6 @@ func (s *TaskProgressService) buildTargetStatsFromTaskConfig(cfg *TaskConfig) []
 			Status:           "pending",
 			Progress:         0,
 			TotalTables:      n, // 每个目标都需要同步 n 张表
-			InitTables:       0,
 			CompletedTables:  0,
 			TotalRecords:     0,
 			ProcessedRecords: 0,
@@ -484,7 +473,6 @@ func mergeFullSyncTargetStats(base []*TargetProgress, runtime []*TargetProgress)
 			} else {
 				merged.Progress = 0
 			}
-			merged.InitTables = r.InitTables
 			merged.CompletedTables = r.CompletedTables
 			merged.TotalRecords = r.TotalRecords
 			merged.ProcessedRecords = r.ProcessedRecords
@@ -543,7 +531,6 @@ func (s *TaskProgressService) buildTargetStatsFromConfig(task *models.SyncTask) 
 			Status:           "pending",
 			Progress:         0,
 			TotalTables:      tablesPerTarget,
-			InitTables:       0,
 			CompletedTables:  0,
 			TotalRecords:     0,
 			ProcessedRecords: 0,

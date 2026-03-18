@@ -538,7 +538,6 @@ func (m *TaskProgressManager) GetAllTargetStats(taskID string) []*TargetProgress
 		var targetName string
 		var currentTable *TargetTableStat
 		completedCount := 0
-		initCount := 0
 		totalCount := len(targetUnits)
 		var totalRecords, processedRecords int64
 
@@ -563,8 +562,6 @@ func (m *TaskProgressManager) GetAllTargetStats(taskID string) []*TargetProgress
 				currentTable = tableStat
 			} else if unit.Status == "completed" {
 				completedCount++
-			} else if unit.Status == "initialized" {
-				initCount++
 			}
 		}
 
@@ -587,7 +584,6 @@ func (m *TaskProgressManager) GetAllTargetStats(taskID string) []*TargetProgress
 			Status:           status,
 			Progress:         progress,
 			TotalTables:      totalCount,
-			InitTables:       initCount,
 			CompletedTables:  completedCount,
 			TotalRecords:     totalRecords,
 			ProcessedRecords: processedRecords,
@@ -623,11 +619,14 @@ func (m *TaskProgressManager) buildProgress(taskID string) *TaskProgress {
 
 	for _, ts := range targetStats {
 		total += ts.TotalTables
-		initialized += ts.InitTables
 		completed += ts.CompletedTables
 		totalRecords += ts.TotalRecords
 		processedRecords += ts.ProcessedRecords
 	}
+
+	// 计算全局 initialized (从源端 Units 统计)
+	_, _, _, _, _, initializedCount := m.GetTaskStats(taskID)
+	initialized = initializedCount
 
 	// 计算总体进度
 	overallProgress := 0.0
@@ -691,7 +690,6 @@ func (m *TaskProgressManager) buildTargetStats(task *TaskProgressData) []*Target
 	for targetID, targetUnits := range task.TargetUnits {
 		var targetName string
 		completedCount := 0
-		initCount := 0
 		totalCount := len(targetUnits)
 		var totalRecords, processedRecords int64
 
@@ -704,9 +702,6 @@ func (m *TaskProgressManager) buildTargetStats(task *TaskProgressData) []*Target
 
 			if unit.Status == "completed" {
 				completedCount++
-				initCount++ // 已完成的表也算已初始化
-			} else if unit.Status == "initialized" || unit.Status == "running" {
-				initCount++ // 初始化状态或运行中的表都算已初始化
 			}
 		}
 
@@ -725,7 +720,6 @@ func (m *TaskProgressManager) buildTargetStats(task *TaskProgressData) []*Target
 			Status:           status,
 			Progress:         progress,
 			TotalTables:      totalCount,
-			InitTables:       initCount,
 			CompletedTables:  completedCount,
 			TotalRecords:     totalRecords,
 			ProcessedRecords: processedRecords,
@@ -750,7 +744,6 @@ type TargetProgress struct {
 	Status           string             `json:"status"` // syncing/completed
 	Progress         float64            `json:"progress"`
 	TotalTables      int                `json:"total_tables"`
-	InitTables       int                `json:"init_tables"`       // 已初始化表数（建表完成后更新）
 	CompletedTables  int                `json:"completed_tables"`  // 已完成表数（数据同步完成后更新）
 	TotalRecords     int64              `json:"total_records"`     // 总记录数（固定）
 	ProcessedRecords int64              `json:"processed_records"` // 已处理记录数

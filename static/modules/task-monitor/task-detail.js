@@ -191,7 +191,6 @@
                     <div class="progress-details mt-3">
                         ${this.renderProgressDetail('任务状态', this.getStatusText(taskStatus), false, false)}
                         ${this.renderProgressDetail('总体进度', (progress.overall_progress != null ? progress.overall_progress.toFixed(2) : 0) + '%', false, true, progress.overall_progress != null ? progress.overall_progress : 0)}
-                        ${progress.init_tables != null ? this.renderProgressDetail('表初始化', `${progress.init_tables} / ${progress.total_tables || 0}`, currentStep === 'initialize', false) : ''}
                         ${this.renderProgressDetail('表同步完成', `${progress.completed_tables || 0} / ${progress.total_tables || 0}`, currentStep === 'sync_data', false)}
                         ${progress.processed_records !== undefined ? this.renderProgressDetail('已处理记录', `${this.formatNumber(progress.processed_records)} / ${this.formatNumber(progress.total_records || 0)}`, currentStep === 'sync_data', false) : ''}
                         ${progress.sync_speed ? this.renderProgressDetail('同步速度', `${this.formatNumber(progress.sync_speed)} 条/秒`, currentStep === 'sync_data', false) : ''}
@@ -568,10 +567,9 @@
                                 <tr>
                                     <th style="width:22%">目标</th>
                                     <th style="width:10%">状态</th>
-                                    <th style="width:14%">初始化表</th>
-                                    <th style="width:14%">已同步</th>
-                                    <th style="width:20%">已处理记录</th>
-                                    <th style="width:20%">进度</th>
+                                    <th style="width:20%">已同步</th>
+                                    <th style="width:24%">已处理记录</th>
+                                    <th style="width:24%">进度</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -579,7 +577,6 @@
                                     <tr>
                                         <td class="text-truncate" title="${(t.target_name || t.target_id || '').replace(/"/g, '&quot;')}">${(t.target_name || t.target_id || '未知目标')}</td>
                                         <td><span class="badge ${t.status === 'completed' ? 'bg-success' : (t.status === 'pending' ? 'bg-secondary' : 'bg-primary')}" style="font-size:0.7rem">${t.status === 'completed' ? '已完成' : (t.status === 'pending' ? '待开始' : '同步中')}</span></td>
-                                        <td>${t.init_tables != null ? t.init_tables : 0} / ${t.total_tables != null ? t.total_tables : 0}</td>
                                         <td>${t.completed_tables != null ? t.completed_tables : 0} / ${t.total_tables != null ? t.total_tables : 0}</td>
                                         <td>${self.formatNumber(t.processed_records || 0)} / ${self.formatNumber(t.total_records || 0)}</td>
                                         <td>
