@@ -1,0 +1,768 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #eef2ff;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+}
+
+/* ========== 布局 ========== */
+
+.layout-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: 240px 1fr;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px 16px;
+  background: linear-gradient(180deg, #1e2a78, #4b2ca0);
+  color: #fff;
+}
+
+.brand {
+  margin-bottom: 16px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.menu-link {
+  padding: 12px 14px;
+  border-radius: 10px;
+  opacity: 0.9;
+  transition: background 0.2s;
+}
+
+.menu-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.menu-link.router-link-active {
+  background: rgba(255, 255, 255, 0.16);
+  opacity: 1;
+}
+
+.page-main {
+  padding: 24px;
+}
+
+/* ========== 页面卡片 ========== */
+
+.page-card {
+  padding: 24px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.page-subtitle {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+/* ========== 按钮统一 ========== */
+
+.page-card .el-button--primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  font-weight: 600;
+}
+
+.page-card .el-button--primary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.page-card .el-button--small {
+  font-size: 13px;
+  border-radius: 8px;
+  padding: 6px 14px;
+}
+
+/* ========== 表格统一 ========== */
+
+.page-card .el-table {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.page-card .el-table th.el-table__cell {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.page-card .el-table td.el-table__cell {
+  font-size: 14px;
+}
+
+.page-card .el-table .el-table__row:hover > td.el-table__cell {
+  background: #f0f0ff;
+}
+
+.page-card .el-table--border .el-table__inner-wrapper::after,
+.page-card .el-table--border::before,
+.page-card .el-table--border::after {
+  border-color: #e5e7eb;
+}
+
+/* ========== 对话框统一 ========== */
+
+.el-dialog__header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 18px 24px;
+  margin: 0;
+  border-radius: 12px 12px 0 0;
+}
+
+.el-dialog__title {
+  color: #fff;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.el-dialog__headerbtn .el-dialog__close {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.el-dialog__headerbtn:hover .el-dialog__close {
+  color: #fff;
+}
+
+.el-dialog__body {
+  padding: 24px;
+}
+
+.el-dialog__footer {
+  padding: 16px 24px;
+  border-top: 1px solid #edf2f7;
+}
+
+/* ========== 提示文本统一 ========== */
+
+.tips-list {
+  margin: 16px 0 0;
+  padding-left: 18px;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}
+
+.empty-state.dark {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.muted {
+  color: #64748b;
+}
+
+.empty-inline {
+  color: #94a3b8;
+}
+
+/* ========== 操作按钮区 ========== */
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ========== 任务监控布局 ========== */
+
+.task-monitor-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 520px) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.task-monitor-right {
+  display: grid;
+  gap: 24px;
+}
+
+/* ========== 监控面板卡片 ========== */
+
+.tm-card {
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.tm-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.tm-card-header h2,
+.tm-card-header h3,
+.tm-card-header p {
+  margin: 0;
+}
+
+.tm-card-header.gradient {
+  color: #fff;
+  border-bottom: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.tm-card-header.gradient.soft p {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.tm-card-body {
+  padding: 20px;
+}
+
+/* ========== 标签页统一 ========== */
+
+.tm-tabs,
+.target-tabs,
+.log-tabs {
+  display: flex;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.tm-tab,
+.target-tab,
+.log-tab,
+.expand-btn {
+  border: 0;
+  cursor: pointer;
+}
+
+.tm-tab,
+.target-tab,
+.log-tab {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.tm-tab:hover,
+.target-tab:hover,
+.log-tab:hover {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.tm-tab.active,
+.target-tab.active,
+.log-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* ========== 任务卡片网格 ========== */
+
+.task-grid-wrap {
+  min-height: 320px;
+}
+
+.task-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.task-card {
+  padding: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+.task-card:hover,
+.task-card.active {
+  transform: translateY(-2px);
+  border-color: #7c3aed;
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.12);
+}
+
+.task-card-title {
+  margin-bottom: 10px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.task-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #64748b;
+}
+
+.task-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* ========== 步骤条 ========== */
+
+.detail-body {
+  padding: 20px;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.step-item {
+  text-align: center;
+  color: #64748b;
+}
+
+.step-item.active,
+.step-item.completed {
+  color: #10b981;
+}
+
+.step-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-weight: 700;
+}
+
+.step-item.active .step-dot,
+.step-item.completed .step-dot {
+  color: #fff;
+  background: #10b981;
+}
+
+/* ========== 概览卡片 ========== */
+
+.overview-grid,
+.summary-grid,
+.config-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.metric,
+.config-box {
+  padding: 16px;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  background: #fafcff;
+}
+
+.metric span,
+.config-box p {
+  display: block;
+  margin: 8px 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.config-box h4,
+.metric strong {
+  margin: 0 0 4px;
+}
+
+.metric strong {
+  display: block;
+  font-size: 18px;
+}
+
+.config-box h4 {
+  margin: 0 0 12px;
+}
+
+.config-box p {
+  margin: 8px 0;
+}
+
+/* ========== 配置块 ========== */
+
+.db-block + .db-block {
+  margin-top: 14px;
+}
+
+.db-title {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.table-list-box {
+  max-height: 420px;
+  overflow: auto;
+}
+
+/* ========== 向导 ========== */
+
+.wizard-layout {
+  display: grid;
+  gap: 22px;
+}
+
+.wizard-step-panel {
+  min-height: 420px;
+}
+
+.wizard-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.wizard-grid.two-cols {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wizard-grid.stretch {
+  align-items: start;
+}
+
+.wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+/* ========== 数据源状态 ========== */
+
+.ds-icon {
+  margin-right: 8px;
+  color: #667eea;
+}
+
+.ds-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.ds-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ds-status i {
+  font-size: 14px;
+}
+
+.ds-status-ok {
+  color: #16a34a;
+}
+
+.ds-status-error {
+  color: #dc2626;
+}
+
+.ds-status-testing {
+  color: #6b7280;
+}
+
+/* ========== 表选择区 ========== */
+
+.table-pick-box {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.db-picker-block + .db-picker-block {
+  margin-top: 16px;
+}
+
+.db-picker-title {
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.table-check-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.mapping-db-header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 180px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.source-name {
+  color: #475569;
+  font-weight: 600;
+}
+
+/* ========== 目标卡片选择 ========== */
+
+.target-card-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.target-card-item {
+  position: relative;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.target-card-item:hover {
+  border-color: #667eea;
+  background: #f8faff;
+}
+
+.target-card-item.selected {
+  border-color: #667eea;
+  background: #eef2ff;
+}
+
+.selected-icon {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: #667eea;
+  font-size: 18px;
+}
+
+.card-body-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-body-inner i {
+  font-size: 24px;
+  color: #667eea;
+}
+
+.card-name {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+/* ========== 批量操作 ========== */
+
+.batch-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.batch-edit-panel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+/* ========== 树形展开 ========== */
+
+.tree-toggle-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-right: 8px;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.step4-db-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.step4-db-header i {
+  margin-right: 6px;
+  transition: transform 0.2s;
+}
+
+/* ========== 确认弹窗 ========== */
+
+.clickable {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.detail-list-box {
+  display: grid;
+  gap: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.detail-list-item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.detail-list-item.column {
+  gap: 6px;
+}
+
+.field-list-box {
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+/* ========== 日志面板 ========== */
+
+.log-panel {
+  min-height: 280px;
+}
+
+.log-body {
+  max-height: 360px;
+  overflow: auto;
+  padding: 18px;
+  color: #d4d4d4;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+  background: #111827;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-line .time {
+  color: #94a3b8;
+}
+
+/* ========== 增量统计 ========== */
+
+.stats-block {
+  overflow: auto;
+}
+
+.stats-table,
+.sub-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stats-table th,
+.stats-table td,
+.sub-table th,
+.sub-table td {
+  padding: 12px 10px;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.stats-table thead th,
+.sub-table thead th {
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.sub-table {
+  margin-top: 8px;
+}
+
+/* ========== 展开按钮 ========== */
+
+.expand-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+/* ========== 目标标签 ========== */
+
+.target-tabs .target-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ========== 响应式 ========== */
+
+@media (max-width: 1200px) {
+  .task-monitor-layout {
+    grid-template-columns: 1fr;
+  }
+}

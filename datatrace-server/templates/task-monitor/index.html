@@ -1,0 +1,144 @@
+{{define "task-monitor/index.html"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - DataTrace</title>
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/components/toast/toast.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/modules/task-monitor/task-monitor.css">
+    <link rel="stylesheet" href="/static/components/utils/common.css">
+    <link rel="stylesheet" href="/static/components/modal/modal.css">
+</head>
+<body>
+
+<!-- 左侧菜单 -->
+<div class="sidebar">
+    <div class="logo">
+        <h5><i class="bi bi-arrow-left-right"></i> DataTrace</h5>
+    </div>
+    <ul class="menu">
+        <li>
+            <a href="/datasources" class="{{if eq .Active "datasources"}}active{{end}}">
+                <i class="bi bi-database"></i> 数据源配置
+            </a>
+        </li>
+        <li>
+            <a href="/credentials" class="{{if eq .Active "credentials"}}active{{end}}">
+                <i class="bi bi-key"></i> 凭据管理
+            </a>
+        </li>
+        <li>
+            <a href="/task-config" class="{{if eq .Active "task-config"}}active{{end}}">
+                <i class="bi bi-gear"></i> 任务配置
+            </a>
+        </li>
+        <li>
+            <a href="/task-monitor" class="{{if eq .Active "task-monitor"}}active{{end}}">
+                <i class="bi bi-activity"></i> 任务执行监控
+            </a>
+        </li>
+    </ul>
+</div>
+
+<!-- Toast 通知容器 -->
+<div class="toast-container"></div>
+
+<!-- 主内容区 -->
+<div class="main-content">
+    <div class="task-list-panel">
+            <div class="task-list-header">
+                <h5><i class="bi bi-list-task me-2"></i>任务执行监控</h5>
+            </div>
+            
+            <!-- 标签页导航 -->
+            <div class="task-category-tabs">
+                <div class="task-tab active" onclick="TaskMonitorList.switchTab(event, 'full')">
+                    <i class="bi bi-database me-2"></i>全量同步
+                </div>
+                <div class="task-tab" onclick="TaskMonitorList.switchTab(event, 'incremental')">
+                    <i class="bi bi-arrow-repeat me-2"></i>增量同步
+                </div>
+                <div class="task-tab" onclick="TaskMonitorList.switchTab(event, 'structure')">
+                    <i class="bi bi-table me-2"></i>结构同步
+                </div>
+            </div>
+            
+            <!-- 标签页内容 -->
+            <div class="task-tab-content">
+                <div class="task-list active" id="fullTaskList">
+                    <div class="text-center text-muted p-3" style="font-size: 13px;">
+                        <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                    </div>
+                </div>
+                
+                <div class="task-list" id="incrementalTaskList">
+                    <div class="text-center text-muted p-3" style="font-size: 13px;">
+                        <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                    </div>
+                </div>
+                
+                <div class="task-list" id="structureTaskList">
+                    <div class="text-center text-muted p-3" style="font-size: 13px;">
+                        <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 使用说明 -->
+            <div class="usage-guide">
+                <div class="guide-content">
+                    <div class="guide-header">
+                        <i class="bi bi-lightbulb"></i>
+                        <span>使用指南</span>
+                    </div>
+                    <div class="guide-items">
+                        <div class="guide-item">
+                            <i class="bi bi-play-fill text-success"></i>
+                            <span>启动：开始执行任务</span>
+                        </div>
+                        <div class="guide-item">
+                            <i class="bi bi-graph-up text-primary"></i>
+                            <span>详情：查看任务进度</span>
+                        </div>
+                        <div class="guide-item">
+                            <i class="bi bi-terminal text-info"></i>
+                            <span>日志：查看执行日志</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+
+<!-- 通用组件 -->
+<script src="/static/components/utils/format.js"></script>
+<script src="/static/components/utils/http.js"></script>
+<script src="/static/components/toast/toast.js"></script>
+<script src="/static/components/modal/modal.js"></script>
+
+<!-- 加载任务监控模块 -->
+<script src="/static/modules/task-monitor/task-list.js"></script>
+<script src="/static/modules/task-monitor/task-detail.js"></script>
+<script src="/static/modules/task-monitor/task-control.js"></script>
+<script src="/static/modules/task-monitor/drawer.js"></script>
+<script src="/static/modules/task-monitor/sse/task-detail-sse.js"></script>
+<script src="/static/modules/task-monitor/sse/progress.js"></script>
+<script src="/static/modules/task-monitor/sse/logs.js"></script>
+<script src="/static/modules/task-monitor/index.js"></script>
+
+<script>
+    // 初始化模块
+    const taskId = '{{.TaskID}}';
+    TaskMonitorModule.init(taskId || null);
+</script>
+
+</body>
+</html>
+{{end}}

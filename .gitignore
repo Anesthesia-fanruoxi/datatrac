@@ -1,0 +1,46 @@
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Go 后端 =====
+datatrace-server/datatrace.exe
+datatrace-server/*.exe
+*.test
+*.out
+*.prof
+vendor/
+
+# ===== 运行时日志 =====
+logs/
+
+# ===== Node.js / 前端 =====
+datatrace-ui/node_modules/
+datatrace-ui/dist/
+datatrace-ui/.vite/
+datatrace-ui/.turbo/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ===== 数据库文件 =====
+*.db
+*.db-wal
+*.db-shm
+
+# ===== 敏感配置 =====
+*.pem
+*.key
+*.cert
+
+# ===== 环境变量 =====
+.env
+.env.*
+!.env.example

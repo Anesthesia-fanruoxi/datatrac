@@ -1,197 +1,43 @@
-# DataTrace 数据同步系统
+# DataTrace Monorepo
 
-DataTrace 是一个基于 Go + Gin 的 Web 数据同步工具，支持 MySQL 和 Elasticsearch 之间的双向数据同步。
+当前仓库已拆分为：
 
-## 🚀 快速开始
+- `datatrace-server/`：Go 后端
+- `datatrace-ui/`：Vue 前端
 
-### 1. 环境要求
+## 启动方式
 
-- Go 1.21+
-- MySQL 5.7+
-
-### 2. 安装依赖
+### 1. 启动后端
 
 ```bash
-go mod download
-```
-
-### 3. 配置数据库
-
-编辑 `config.yaml` 文件，配置您的 MySQL 连接信息：
-
-```yaml
-database:
-  host: localhost
-  port: 3306
-  username: root
-  password: your_password
-  database: datatrace
-```
-
-### 4. 创建数据库
-
-```sql
-CREATE DATABASE datatrace CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-### 5. 运行项目
-
-```bash
+cd datatrace-server
 go run main.go
 ```
 
-服务将在 `http://localhost:8080` 启动。
+默认端口：`http://127.0.0.1:8090`
 
-### 6. 健康检查
+### 2. 启动前端
 
-访问 `http://localhost:8080/health` 检查服务是否正常运行。
-
-## 📁 项目结构
-
-```
-datatrace/
-├── main.go                 # 程序入口
-├── config.yaml             # 配置文件
-├── go.mod                  # 依赖管理
-├── api/                    # API处理器（待实现）
-├── models/                 # 数据模型
-│   ├── datasource.go       # 数据源模型
-│   └── sync_task.go        # 任务模型
-├── services/               # 业务逻辑层（待实现）
-├── routers/                # 路由配置
-│   └── router.go
-├── common/                 # 中间件
-│   ├── response.go         # 响应封装
-│   └── logger.go           # 日志中间件
-├── config/                 # 配置管理
-│   └── config.go
-├── database/               # 数据库初始化
-│   └── mysql.go
-└── docs/                   # 文档
+```bash
+cd datatrace-ui
+npm install
+npm run dev
 ```
 
-## 🔧 配置说明
+默认端口：`http://127.0.0.1:3000`
 
-### config.yaml
+前端已配置开发代理：
 
-```yaml
-# 数据库配置
-database:
-  host: localhost           # 数据库主机
-  port: 3306               # 数据库端口
-  username: root           # 数据库用户名
-  password: root           # 数据库密码
-  database: datatrace      # 数据库名称
-  max_open_conns: 100      # 最大打开连接数
-  max_idle_conns: 10       # 最大空闲连接数
+- `/api/*` → `http://127.0.0.1:8090`
+- `/health` → `http://127.0.0.1:8090`
 
-# 服务器配置
-server:
-  port: 8080               # 服务监听端口
-  mode: debug              # 运行模式: debug/release
+## 迁移策略
 
-# 安全配置
-security:
-  encryption_key: "change-this-to-a-32-byte-key!!"  # 加密密钥（32字节）
-```
+当前 `datatrace-server/static` 与 `datatrace-server/templates` 先保留，作为 Vue 页面迁移参考。
 
-⚠️ **重要**：请修改 `security.encryption_key` 为您自己的32字节密钥！
+优先迁移顺序建议：
 
-## 📊 数据库表
-
-系统启动时会自动创建以下表：
-
-- `data_sources` - 数据源表（存储数据源连接信息）
-- `sync_tasks` - 同步任务表（存储任务基本信息和最终状态）
-
-注：任务详细配置（表映射等）存储在Redis中，运行时进度在内存中维护
-
-📖 **详细架构说明**：请查看 [重构后架构说明](./docs/architecture/重构后架构说明.md)
-
-## 🎯 API 接口
-
-### 健康检查
-
-```
-GET /health
-```
-
-### 数据源管理
-
-```
-GET    /api/v1/datasources      # 获取数据源列表
-POST   /api/v1/datasources      # 创建数据源（待实现）
-GET    /api/v1/datasources/:id  # 获取数据源详情（待实现）
-PUT    /api/v1/datasources/:id  # 更新数据源（待实现）
-DELETE /api/v1/datasources/:id  # 删除数据源（待实现）
-```
-
-### 任务管理
-
-```
-GET    /api/v1/tasks      # 获取任务列表
-POST   /api/v1/tasks      # 创建任务（待实现）
-GET    /api/v1/tasks/:id  # 获取任务详情（待实现）
-PUT    /api/v1/tasks/:id  # 更新任务（待实现）
-DELETE /api/v1/tasks/:id  # 删除任务（待实现）
-```
-
-## 📚 文档
-
-详细设计文档请查看 `docs/` 目录：
-
-- [系统设计文档](docs/requirements.md)
-- [数据库设计](docs/数据库设计.md)
-- [设计概览](docs/设计概览.md)
-
-## 🔄 开发状态
-
-- ✅ 项目基础框架
-- ✅ 数据库连接和模型
-- ✅ 路由和中间件
-- ⏳ 数据源管理 API
-- ⏳ 任务管理 API
-- ⏳ 同步引擎核心
-- ⏳ 任务调度器
-
-## 📝 开发计划
-
-### 阶段一：基础框架 ✅ 已完成
-
-- [x] 项目初始化
-- [x] 配置管理
-- [x] 数据库连接
-- [x] 数据模型定义
-- [x] 路由配置
-- [x] 响应封装
-
-### 阶段二：数据源管理（进行中）
-
-- [ ] 数据源 CRUD API
-- [ ] 数据源连接测试
-- [ ] 密码加密服务
-- [ ] 数据库/表/索引查询
-
-### 阶段三：任务管理
-
-- [ ] 任务配置 API
-- [ ] 任务单元生成
-- [ ] 任务状态管理
-
-### 阶段四：同步引擎
-
-- [ ] Pipeline 框架
-- [ ] Source 适配器
-- [ ] Transformer 转换器
-- [ ] Sink 适配器
-
-### 阶段五：任务调度
-
-- [ ] TaskManager 实现
-- [ ] 并发控制
-- [ ] 进度监控
-- [ ] SSE 推送
-
-## 📄 License
-
-MIT License
+1. 任务监控
+2. 任务配置
+3. 数据源管理
+4. 凭据管理

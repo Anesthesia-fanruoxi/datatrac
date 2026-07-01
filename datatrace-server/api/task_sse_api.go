@@ -1,0 +1,205 @@
+package api
+
+import (
+	"datatrace/services"
+	"io"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// TaskSSEAPI SSE API控制器
+type TaskSSEAPI struct {
+	sseService *services.TaskSSEService
+}
+
+// NewTaskSSEAPI 创建SSE API控制器
+func NewTaskSSEAPI() *TaskSSEAPI {
+	return &TaskSSEAPI{
+		sseService: services.NewTaskSSEService(),
+	}
+}
+
+// StreamLogs 流式推送任务日志
+func (api *TaskSSEAPI) StreamLogs(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 获取category参数，默认all
+	category := c.DefaultQuery("category", "all")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加客户端（带category）
+	api.sseService.AddLogClient(taskID, category, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveLogClient(taskID, category, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（监听文件变化）
+	go api.sseService.StreamLogs(taskID, category, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// StreamTaskDetail 流式推送任务详情（状态、当前步骤等）
+func (api *TaskSSEAPI) StreamTaskDetail(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加到详情客户端列表
+	api.sseService.AddDetailClient(taskID, client)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveDetailClient(taskID, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（推送任务详情）
+	go api.sseService.StreamTaskDetail(taskID, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// StreamProgress 流式推送任务进度（统一接口）
+func (api *TaskSSEAPI) StreamProgress(c *gin.Context) {
+	taskID := c.Param("id")
+
+	// 获取查询参数（可选）
+	dbName := c.Query("database")
+	targetID := c.Query("target_id")
+
+	// 设置SSE响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 创建客户端通道
+	client := make(chan services.SSEMessage, 10)
+
+	// 添加到进度客户端列表（传递参数）
+	api.sseService.AddProgressClient(taskID, client, dbName, targetID)
+
+	// 确保清理资源
+	defer func() {
+		api.sseService.RemoveProgressClient(taskID, client)
+		close(client)
+	}()
+
+	// 获取响应写入器
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// 创建退出信号通道
+	done := make(chan struct{})
+
+	// 启动推送协程（推送统一进度，传递参数）
+	go api.sseService.StreamProgress(taskID, dbName, targetID, client, done)
+
+	// 监听客户端断开
+	notify := c.Request.Context().Done()
+
+	// 发送消息
+	for {
+		select {
+		case <-notify:
+			close(done)
+			return
+		case msg, ok := <-client:
+			if !ok {
+				return
+			}
+			_, err := io.WriteString(w, services.FormatSSEMessage(msg))
+			if err != nil {
+				close(done)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
